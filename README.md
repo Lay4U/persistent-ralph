@@ -2,9 +2,9 @@
 
 **완전 자율 Ralph Loop - Auto-compact 이후에도 절대 멈추지 않는 시스템**
 
-## 핵심 기능
+[ralph-claude-code](https://github.com/frankbria/ralph-claude-code)의 모든 핵심 기능을 Claude Code 플러그인으로 통합했습니다.
 
-기존 `ralph-loop` 플러그인의 한계를 극복한 완전 자율 에이전트 시스템:
+## 핵심 기능
 
 | 문제 | 해결책 |
 |------|--------|
@@ -13,15 +13,44 @@
 | 새 세션에서 수동 재개 필요 | `SessionStart` hook에서 강력한 컨텍스트 자동 주입 |
 | 컨텍스트 손실 | `experiments.md`에 진행 상황 영구 저장 |
 
+## 고급 기능 (ralph-claude-code 통합)
+
+### Circuit Breaker (회로 차단기)
+무한 루프와 스태그네이션 방지:
+- **CLOSED**: 정상 동작
+- **HALF_OPEN**: 모니터링 모드 (진행 없음 2회)
+- **OPEN**: 실행 중지 (진행 없음 5회)
+
+### Response Analyzer (응답 분석기)
+Claude 출력 분석:
+- `RALPH_STATUS` 블록 파싱
+- 완료 신호 감지
+- Dual-condition EXIT_SIGNAL gate
+
+### Rate Limiter (속도 제한)
+API 사용량 관리:
+- 시간당 100회 API 호출 제한
+- 5시간 API 제한 감지
+- 자동 리셋 및 재개
+
+### Session Manager (세션 관리)
+세션 수명 관리:
+- 24시간 세션 만료
+- 세션 히스토리 추적
+- 자동 세션 연장
+
+### Status Generator (상태 생성)
+외부 모니터링 지원:
+- `status.json` 실시간 생성
+- 진행 상황 추적
+
 ## 설치
 
-### 1. 플러그인 디렉토리 생성
+### 1. 플러그인 디렉토리 복사
 
 ```bash
 # Windows
 mkdir -p ~/.claude/plugins/local/persistent-ralph
-
-# 또는 직접 복사
 cp -r . ~/.claude/plugins/local/persistent-ralph/
 ```
 
@@ -40,10 +69,29 @@ cp -r . ~/.claude/plugins/local/persistent-ralph/
 ### 3. 필수 요구사항
 
 - **Git Bash** 설치 필요 (`C:\Program Files\Git\bin\bash.exe`)
-- **jq** 설치 권장 (JSON 처리)
-- **기존 ralph-loop 플러그인과 함께 사용** (Stop hook 보완)
+- **jq** 설치 필요 (JSON 처리) - `choco install jq` 또는 Git Bash에 포함
 
 ## 사용법
+
+### 프로젝트 설정
+
+```bash
+/ralph-loop:setup
+```
+
+템플릿 파일과 디렉토리 구조 생성:
+- `PROMPT.md` - 개발 지침
+- `@fix_plan.md` - 우선순위 작업 목록
+- `@AGENT.md` - 빌드/테스트 지침
+- `specs/` - 프로젝트 명세
+
+### PRD 가져오기
+
+```bash
+/ralph-loop:import <path-to-prd>
+```
+
+PRD를 Ralph specs 형식으로 변환.
 
 ### Ralph Loop 시작
 
@@ -55,22 +103,39 @@ cp -r . ~/.claude/plugins/local/persistent-ralph/
 /ralph-loop "실험 계속"
 ```
 
-### 완료 조건
+### 상태 확인
 
-Claude가 `<promise>DONE</promise>` 형식으로 출력하면 루프 종료:
-
-```
-작업이 완료되었습니다.
-<promise>DONE</promise>
+```bash
+cat status.json
 ```
 
 ### 취소
 
 ```bash
 /cancel-ralph
-# 또는
-/ralph-loop:cancel-ralph
 ```
+
+## RALPH_STATUS 블록
+
+Claude가 각 루프 끝에 보고해야 하는 상태:
+
+```
+---RALPH_STATUS---
+STATUS: IN_PROGRESS | COMPLETE | BLOCKED
+TASKS_COMPLETED_THIS_LOOP: <number>
+FILES_MODIFIED: <number>
+TESTS_STATUS: PASSING | FAILING | NOT_RUN
+WORK_TYPE: IMPLEMENTATION | TESTING | DOCUMENTATION | REFACTORING
+EXIT_SIGNAL: false | true
+RECOMMENDATION: <다음 단계 요약>
+---END_RALPH_STATUS---
+```
+
+### EXIT_SIGNAL = true 조건
+1. @fix_plan.md의 모든 항목 완료
+2. 모든 테스트 통과
+3. 에러 없음
+4. specs/ 요구사항 모두 구현
 
 ## 아키텍처
 
@@ -81,11 +146,11 @@ Claude가 `<promise>DONE</promise>` 형식으로 출력하면 루프 종료:
 │                                                                  │
 │  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐    │
 │  │  Stop Hook   │────▶│  Block Exit  │────▶│  Continue    │    │
-│  │              │     │  decision:   │     │  Loop        │    │
-│  │  stop-hook.sh│     │  block       │     │              │    │
+│  │              │     │  + Rate Limit│     │  Loop        │    │
+│  │              │     │  + Session   │     │              │    │
 │  └──────────────┘     └──────────────┘     └──────────────┘    │
 │         │                                                        │
-│         │ (if completion promise met)                            │
+│         │ (if completion promise or circuit breaker open)        │
 │         ▼                                                        │
 │  ┌──────────────┐                                               │
 │  │  Allow Exit  │                                               │
@@ -93,29 +158,26 @@ Claude가 `<promise>DONE</promise>` 형식으로 출력하면 루프 종료:
 │  └──────────────┘                                               │
 │                                                                  │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐    │
-│  │ PreCompact   │────▶│ Save State   │────▶│ experiments. │    │
-│  │ Hook         │     │ Update       │     │ md           │    │
-│  │              │     │ iteration    │     │              │    │
-│  └──────────────┘     └──────────────┘     └──────────────┘    │
-│                                                                  │
+│                     SAFETY FEATURES                              │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐    │
-│  │ SessionStart │────▶│ Inject       │────▶│ Auto Resume  │    │
-│  │ Hook         │     │ Context      │     │ Work         │    │
-│  │              │     │ git log      │     │              │    │
-│  │              │     │ experiments  │     │              │    │
-│  └──────────────┘     └──────────────┘     └──────────────┘    │
+│  Circuit Breaker ──▶ Response Analyzer ──▶ Rate Limiter        │
+│         │                    │                    │              │
+│         ▼                    ▼                    ▼              │
+│  스태그 감지         완료 신호 감지       속도 제한 적용        │
+│  (5회 무진행)       (RALPH_STATUS)      (100회/시간)           │
+│         │                    │                    │              │
+│         ▼                    ▼                    ▼              │
+│     루프 중지            루프 종료          일시 정지            │
 │                                                                  │
 ├─────────────────────────────────────────────────────────────────┤
+│                    SESSION MANAGEMENT                            │
+├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐    │
-│  │ UserPrompt   │────▶│ Replace      │────▶│ Full Prompt  │    │
-│  │ Submit Hook  │     │ "continue"   │     │ Injection    │    │
-│  │              │     │ with task    │     │              │    │
-│  └──────────────┘     └──────────────┘     └──────────────┘    │
+│  Session Manager ──▶ Status Generator ──▶ status.json           │
+│         │                    │                                   │
+│         ▼                    ▼                                   │
+│  24시간 만료           실시간 모니터링                           │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -128,99 +190,48 @@ persistent-ralph/
 │   └── plugin.json          # 플러그인 메타데이터
 ├── hooks/
 │   ├── hooks.json           # Hook 정의
-│   ├── stop-hook.sh         # 세션 종료 차단
-│   ├── run-stop-hook.cmd    # Windows 래퍼
-│   ├── pre-compact.sh       # Compact 전 상태 저장
-│   ├── run-pre-compact.cmd  # Windows 래퍼
-│   ├── auto-resume.sh       # 세션 시작 시 자동 재개
-│   ├── run-auto-resume.cmd  # Windows 래퍼
-│   ├── prompt-replace.sh    # 빈 입력 시 프롬프트 대체
-│   └── run-prompt-replace.cmd
+│   ├── lib/                 # 라이브러리
+│   │   ├── utils.sh         # 공통 유틸리티
+│   │   ├── circuit-breaker.sh
+│   │   ├── response-analyzer.sh
+│   │   ├── rate-limiter.sh
+│   │   ├── session-manager.sh
+│   │   └── status-generator.sh
+│   ├── stop-hook.sh
+│   ├── pre-compact.sh
+│   ├── auto-resume.sh
+│   ├── prompt-replace.sh
+│   └── run-*.cmd            # Windows 래퍼
+├── templates/
+│   ├── PROMPT.md
+│   ├── fix_plan.md
+│   └── AGENT.md
 ├── commands/
-│   └── help.md              # 도움말
+│   ├── help.md
+│   ├── setup.md
+│   └── import.md
 └── README.md
 ```
 
 ## 상태 파일
 
-### `.claude/ralph-loop.local.md`
+| 파일 | 설명 |
+|------|------|
+| `.claude/ralph-loop.local.md` | 루프 상태 (iteration, promise 등) |
+| `.claude/circuit-breaker.json` | Circuit Breaker 상태 |
+| `.claude/response-analysis.json` | 응답 분석 결과 |
+| `.claude/call-count.json` | API 호출 카운트 |
+| `.claude/ralph-session.json` | 세션 정보 |
+| `status.json` | 모니터링용 상태 |
+| `experiments.md` | 진행 상황 로그 |
 
-```markdown
----
-active: true
-iteration: 5
-max_iterations: 100
-completion_promise: "DONE"
-started_at: 2024-01-15T10:30:00Z
-compact_count: 2
-last_compact: 2024-01-15T12:45:00Z
----
+## 환경 변수
 
-원본 프롬프트 내용...
-```
-
-### `experiments.md`
-
-자동 생성되는 진행 상황 로그:
-
-```markdown
-# Ralph Loop Experiments Log
-
-## Compact Event: 2024-01-15T12:45:00Z
-
-**Trigger:** auto
-**Iteration:** 5 / 100
-**Compact Count:** 2
-
-### Recent Git Commits
-abc1234 feat: add new feature
-def5678 fix: resolve bug
-...
-```
-
-## Hooks 상세
-
-### Stop Hook
-
-세션 종료 시 호출. 루프가 활성화되어 있으면 종료를 차단:
-
-```json
-{
-  "decision": "block",
-  "reason": "RALPH LOOP ACTIVE - Continue working on: ..."
-}
-```
-
-**종료 허용 조건:**
-- `completion_promise`가 출력에서 발견됨
-- `max_iterations`에 도달
-- 루프가 비활성화됨
-
-### PreCompact Hook
-
-Auto-compact 전에 실행. 상태를 저장:
-
-- `ralph-loop.local.md`에 `compact_count` 증가
-- `experiments.md`에 진행 상황 기록
-- git log 스냅샷 저장
-
-### SessionStart Hook
-
-새 세션/compact 후 실행. 강력한 컨텍스트 주입:
-
-- 원본 프롬프트
-- 최근 git commits
-- experiments.md 요약
-- 즉시 시작 지시
-
-### UserPromptSubmit Hook
-
-빈 입력이나 "continue" 등 입력 시 전체 프롬프트로 대체.
-
-**트리거 키워드:**
-- (빈 입력/엔터)
-- `c`, `continue`, `go`, `resume`, `start`
-- `계속`, `시작`
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `RALPH_MAX_CALLS_PER_HOUR` | 100 | 시간당 최대 API 호출 |
+| `RALPH_API_LIMIT_HOURS` | 5 | API 제한 해제 대기 시간 |
+| `RALPH_SESSION_EXPIRY_HOURS` | 24 | 세션 만료 시간 |
 
 ## 랄프의 법칙
 
@@ -235,32 +246,17 @@ Auto-compact 전에 실행. 상태를 저장:
 ## 트러블슈팅
 
 ### 루프가 재개되지 않음
-
 1. `.claude/ralph-loop.local.md` 파일 확인
 2. `active: true` 확인
-3. Git Bash 설치 확인: `C:\Program Files\Git\bin\bash.exe`
 
-### Stop Hook이 작동하지 않음
+### Circuit Breaker OPEN
+1. experiments.md 확인
+2. git log로 진행 상황 확인
+3. 문제 해결 후 `/ralph-loop "continue"` 실행
 
-1. `hooks.json`에 Stop hook 정의 확인
-2. `run-stop-hook.cmd` 파일 존재 확인
-3. Claude Code 로그 확인
-
-### Compact 후 컨텍스트 손실
-
-1. `experiments.md` 파일 확인
-2. `PreCompact` hook 동작 확인
-3. git log로 이전 작업 확인
-
-## 기존 ralph-loop 플러그인과의 차이점
-
-| 기능 | ralph-loop | persistent-ralph |
-|------|------------|------------------|
-| Stop Hook | 없음 | **있음** (세션 종료 차단) |
-| PreCompact Hook | 없음 | **있음** (상태 저장) |
-| SessionStart matcher | `resume\|compact\|clear` | **없음** (모든 세션) |
-| 상태 영구 저장 | 없음 | **experiments.md** |
-| Auto-compact 후 재개 | 수동 | **자동** |
+### Rate Limit 도달
+1. status.json에서 reset 시간 확인
+2. 자동 재개 대기
 
 ## 라이선스
 

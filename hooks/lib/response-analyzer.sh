@@ -1,6 +1,7 @@
 #!/bin/bash
 # Persistent Ralph - Response Analyzer
 # Analyzes Claude output to detect completion signals and progress
+# Includes RALPH_STATUS block parsing and dual-condition EXIT_SIGNAL gate
 
 # Source utilities
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
@@ -8,6 +9,12 @@ source "$SCRIPT_DIR/utils.sh"
 
 # Analysis configuration
 ANALYSIS_FILE=".claude/response-analysis.json"
+EXIT_SIGNALS_FILE=".claude/exit-signals.json"
+
+# Dual-condition EXIT_SIGNAL gate configuration
+# Requires BOTH completion_indicators >= 2 AND exit_signal == true from Claude
+MAX_CONSECUTIVE_TEST_LOOPS=3
+MAX_CONSECUTIVE_DONE_SIGNALS=2
 
 # Completion keywords
 COMPLETION_KEYWORDS=(
@@ -258,11 +265,66 @@ should_exit_gracefully() {
         return 0
     fi
 
-    if [[ $completion_indicators -ge 2 ]]; then
+    # Dual-condition EXIT_SIGNAL gate
+    # Requires BOTH completion_indicators >= 2 AND exit_signal == true from Claude
+    # This prevents premature exits when heuristics detect completion patterns
+    # but Claude explicitly indicates work is still in progress via RALPH_STATUS block
+    local claude_exit_signal="false"
+    if [[ -f "$ANALYSIS_FILE" ]]; then
+        claude_exit_signal=$(json_get "$ANALYSIS_FILE" ".analysis.exit_signal" "false")
+    fi
+
+    if [[ $completion_indicators -ge 2 ]] && [[ "$claude_exit_signal" == "true" ]]; then
         echo "project_complete"
         return 0
     fi
 
     echo ""
+    return 1
+}
+
+# Parse RALPH_STATUS block from transcript
+# Returns: STATUS|TASKS_COMPLETED|FILES_MODIFIED|TESTS_STATUS|WORK_TYPE|EXIT_SIGNAL|RECOMMENDATION
+parse_ralph_status() {
+    local transcript=$1
+
+    if ! echo "$transcript" | grep -q -- "---RALPH_STATUS---"; then
+        echo ""
+        return 1
+    fi
+
+    # Extract the status block
+    local status_block=$(echo "$transcript" | sed -n '/---RALPH_STATUS---/,/---END_RALPH_STATUS---/p')
+
+    local status=$(echo "$status_block" | grep "^STATUS:" | cut -d: -f2 | xargs)
+    local tasks=$(echo "$status_block" | grep "TASKS_COMPLETED_THIS_LOOP:" | cut -d: -f2 | xargs)
+    local files=$(echo "$status_block" | grep "FILES_MODIFIED:" | cut -d: -f2 | xargs)
+    local tests=$(echo "$status_block" | grep "TESTS_STATUS:" | cut -d: -f2 | xargs)
+    local work_type=$(echo "$status_block" | grep "WORK_TYPE:" | cut -d: -f2 | xargs)
+    local exit_sig=$(echo "$status_block" | grep "EXIT_SIGNAL:" | cut -d: -f2 | xargs)
+    local recommendation=$(echo "$status_block" | grep "RECOMMENDATION:" | cut -d: -f2- | xargs)
+
+    echo "$status|$tasks|$files|$tests|$work_type|$exit_sig|$recommendation"
+    return 0
+}
+
+# Check @fix_plan.md for completion
+check_fix_plan_completion() {
+    local fix_plan_file="@fix_plan.md"
+
+    if [[ ! -f "$fix_plan_file" ]]; then
+        echo ""
+        return 1
+    fi
+
+    local total_items=$(grep -c "^- \[" "$fix_plan_file" 2>/dev/null || echo "0")
+    local completed_items=$(grep -c "^- \[x\]" "$fix_plan_file" 2>/dev/null || echo "0")
+
+    if [[ $total_items -gt 0 ]] && [[ $completed_items -eq $total_items ]]; then
+        echo "plan_complete"
+        return 0
+    fi
+
+    echo "$completed_items/$total_items"
     return 1
 }

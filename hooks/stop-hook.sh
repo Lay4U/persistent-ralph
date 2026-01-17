@@ -2,7 +2,7 @@
 
 # Persistent Ralph - Stop Hook (Enhanced with Circuit Breaker & Response Analyzer)
 # Intercepts session stop, analyzes response, and blocks if Ralph loop is active
-# Includes stagnation detection to prevent runaway loops
+# Includes stagnation detection, rate limiting, session management, and status generation
 
 set -euo pipefail
 
@@ -11,6 +11,9 @@ SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 source "$SCRIPT_DIR/lib/utils.sh"
 source "$SCRIPT_DIR/lib/circuit-breaker.sh"
 source "$SCRIPT_DIR/lib/response-analyzer.sh"
+source "$SCRIPT_DIR/lib/rate-limiter.sh"
+source "$SCRIPT_DIR/lib/session-manager.sh"
+source "$SCRIPT_DIR/lib/status-generator.sh"
 
 # Read hook input from stdin
 HOOK_INPUT=$(cat)
@@ -183,6 +186,49 @@ RALPH'S LAWS:
 To cancel: /cancel-ralph or /ralph-loop:cancel-ralph
 ================================================================================
 "
+
+# Update session activity
+update_session_activity
+
+# Increment call counter for rate limiting
+increment_call_counter > /dev/null
+
+# Check rate limit
+if ! can_make_call; then
+    RATE_STATUS=$(get_rate_limit_status)
+    log_to_file "STOP" "Rate limit reached. $RATE_STATUS"
+    generate_status "$NEW_ITERATION" "0" "rate_limit" "paused" "Rate limit reached"
+
+    RATE_REASON="
+================================================================================
+RATE LIMIT REACHED - Loop Paused
+================================================================================
+
+$RATE_STATUS
+
+The Ralph loop has been temporarily paused due to rate limiting.
+It will automatically resume when the limit resets (next hour).
+
+To check status: cat status.json
+To cancel: /cancel-ralph
+
+================================================================================
+"
+    jq -n --arg reason "$RATE_REASON" '{"decision": null, "reason": $reason}'
+    exit 0
+fi
+
+# Check session validity
+if ! is_session_valid; then
+    log_to_file "STOP" "Session expired"
+    generate_status "$NEW_ITERATION" "0" "session_expired" "ended" "Session expired"
+    rm "$RALPH_STATE_FILE" 2>/dev/null || true
+    echo '{"decision": null}'
+    exit 0
+fi
+
+# Generate status for monitoring
+generate_status "$NEW_ITERATION" "$(json_get '.claude/call-count.json' '.calls_this_hour' '0')" "continuing" "running"
 
 # Log the continuation
 log_to_file "STOP" "Continuing loop. $ITERATION_INFO | Files: $FILES_MODIFIED | Errors: $ERROR_COUNT"
