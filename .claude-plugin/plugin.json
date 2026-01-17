@@ -1,5 +1,5 @@
 {
-  "name": "ralph-loop",
+  "name": "persistent-ralph",
   "version": "2.0.0",
   "description": "Persistent Ralph Loop - Complete autonomous agent system that never stops. Features Stop hook (blocks session exit), PreCompact hook (saves state), and SessionStart hook (auto-resume). Works seamlessly across auto-compact and new sessions.",
   "author": {
