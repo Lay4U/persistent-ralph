@@ -2,9 +2,13 @@
 
 # Persistent Ralph - PreCompact Hook
 # Saves state before auto-compact to ensure seamless resume
-# Runs before context compaction (manual or auto)
+# Records progress snapshot in experiments.md
 
 set -euo pipefail
+
+# Get script directory and source libraries
+SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+source "$SCRIPT_DIR/lib/utils.sh"
 
 # Read hook input from stdin
 HOOK_INPUT=$(cat)
@@ -13,7 +17,7 @@ HOOK_INPUT=$(cat)
 RALPH_STATE_FILE=".claude/ralph-loop.local.md"
 
 if [[ ! -f "$RALPH_STATE_FILE" ]]; then
-  exit 0
+    exit 0
 fi
 
 # Get trigger type (manual or auto)
@@ -24,50 +28,57 @@ FRONTMATTER=$(sed -n '/^---$/,/^---$/{ /^---$/d; p; }' "$RALPH_STATE_FILE")
 ACTIVE=$(echo "$FRONTMATTER" | grep '^active:' | sed 's/active: *//' || echo "false")
 
 if [[ "$ACTIVE" != "true" ]]; then
-  exit 0
+    exit 0
 fi
 
 # Extract current state
 ITERATION=$(echo "$FRONTMATTER" | grep '^iteration:' | sed 's/iteration: *//' || echo "0")
 MAX_ITERATIONS=$(echo "$FRONTMATTER" | grep '^max_iterations:' | sed 's/max_iterations: *//' || echo "0")
-COMPLETION_PROMISE=$(echo "$FRONTMATTER" | grep '^completion_promise:' | sed 's/completion_promise: *//' | sed 's/^"\(.*\)"$/\1/' || echo "")
-STARTED_AT=$(echo "$FRONTMATTER" | grep '^started_at:' | sed 's/started_at: *//' || echo "")
-
-# Record compact event in state file
-COMPACT_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-# Add or update last_compact field
-if grep -q '^last_compact:' "$RALPH_STATE_FILE"; then
-  sed -i "s/^last_compact: .*/last_compact: $COMPACT_TIME/" "$RALPH_STATE_FILE"
-else
-  # Add before the closing --- of frontmatter
-  sed -i "/^---$/,/^---$/ { /^---$/ { n; /^---$/ i\\
-last_compact: $COMPACT_TIME
-}}" "$RALPH_STATE_FILE"
-fi
-
-# Add or update compact_count
 COMPACT_COUNT=$(echo "$FRONTMATTER" | grep '^compact_count:' | sed 's/compact_count: *//' || echo "0")
-if [[ ! "$COMPACT_COUNT" =~ ^[0-9]+$ ]]; then
-  COMPACT_COUNT=0
-fi
+
+# Ensure numeric
+[[ ! "$ITERATION" =~ ^[0-9]+$ ]] && ITERATION=0
+[[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]] && MAX_ITERATIONS=0
+[[ ! "$COMPACT_COUNT" =~ ^[0-9]+$ ]] && COMPACT_COUNT=0
+
+# Increment compact count
 NEW_COMPACT_COUNT=$((COMPACT_COUNT + 1))
+COMPACT_TIME=$(get_iso_timestamp)
+
+# Update state file
+if grep -q '^last_compact:' "$RALPH_STATE_FILE"; then
+    sed -i "s/^last_compact: .*/last_compact: $COMPACT_TIME/" "$RALPH_STATE_FILE"
+else
+    sed -i "/^active:/a last_compact: $COMPACT_TIME" "$RALPH_STATE_FILE"
+fi
 
 if grep -q '^compact_count:' "$RALPH_STATE_FILE"; then
-  sed -i "s/^compact_count: .*/compact_count: $NEW_COMPACT_COUNT/" "$RALPH_STATE_FILE"
+    sed -i "s/^compact_count: .*/compact_count: $NEW_COMPACT_COUNT/" "$RALPH_STATE_FILE"
 else
-  sed -i "/^---$/,/^---$/ { /^---$/ { n; /^---$/ i\\
-compact_count: $NEW_COMPACT_COUNT
-}}" "$RALPH_STATE_FILE"
+    sed -i "/^active:/a compact_count: $NEW_COMPACT_COUNT" "$RALPH_STATE_FILE"
 fi
 
-# Create/update experiments.md with current progress summary
-EXPERIMENTS_FILE="experiments.md"
-
-# Get recent git commits for context preservation
+# Get recent git commits
 RECENT_COMMITS=""
 if command -v git &>/dev/null && git rev-parse --git-dir &>/dev/null; then
-  RECENT_COMMITS=$(git log --oneline -10 2>/dev/null || echo "No git history")
+    RECENT_COMMITS=$(git log --oneline -10 2>/dev/null || echo "No git history")
+fi
+
+# Get circuit breaker status if available
+CB_STATUS=""
+if [[ -f ".claude/circuit-breaker.json" ]]; then
+    CB_STATE=$(jq -r '.state // "UNKNOWN"' .claude/circuit-breaker.json 2>/dev/null || echo "UNKNOWN")
+    CB_REASON=$(jq -r '.reason // ""' .claude/circuit-breaker.json 2>/dev/null || echo "")
+    CB_STATUS="Circuit Breaker: $CB_STATE"
+    [[ -n "$CB_REASON" ]] && CB_STATUS="$CB_STATUS ($CB_REASON)"
+fi
+
+# Get analysis summary if available
+ANALYSIS_SUMMARY=""
+if [[ -f ".claude/response-analysis.json" ]]; then
+    CONFIDENCE=$(jq -r '.analysis.confidence_score // 0' .claude/response-analysis.json 2>/dev/null || echo "0")
+    FILES=$(jq -r '.analysis.files_modified // 0' .claude/response-analysis.json 2>/dev/null || echo "0")
+    ANALYSIS_SUMMARY="Analysis: Confidence $CONFIDENCE%, Files modified: $FILES"
 fi
 
 # Build progress snapshot
@@ -77,6 +88,8 @@ SNAPSHOT="
 **Trigger:** $TRIGGER
 **Iteration:** $ITERATION / $(if [[ $MAX_ITERATIONS -gt 0 ]]; then echo $MAX_ITERATIONS; else echo 'unlimited'; fi)
 **Compact Count:** $NEW_COMPACT_COUNT
+$CB_STATUS
+$ANALYSIS_SUMMARY
 
 ### Recent Git Commits
 \`\`\`
@@ -86,24 +99,27 @@ $RECENT_COMMITS
 ---
 "
 
-# Append to experiments.md
+# Write to experiments.md
+EXPERIMENTS_FILE="experiments.md"
+
 if [[ -f "$EXPERIMENTS_FILE" ]]; then
-  # Prepend to existing file
-  EXISTING=$(cat "$EXPERIMENTS_FILE")
-  echo -e "$SNAPSHOT\n$EXISTING" > "$EXPERIMENTS_FILE"
+    # Prepend to existing file
+    EXISTING=$(cat "$EXPERIMENTS_FILE")
+    echo -e "$SNAPSHOT\n$EXISTING" > "$EXPERIMENTS_FILE"
 else
-  # Create new file
-  cat > "$EXPERIMENTS_FILE" << EOF
+    # Create new file
+    cat > "$EXPERIMENTS_FILE" << EOF
 # Ralph Loop Experiments Log
 
-This file tracks the progress of Ralph loop iterations across context compactions.
+This file tracks progress across context compactions.
+It serves as persistent memory for the Ralph loop.
 
 ---
 $SNAPSHOT
 EOF
 fi
 
-# Output message for logging
-echo "PreCompact: Saved state for iteration $ITERATION, compact #$NEW_COMPACT_COUNT ($TRIGGER)"
+# Log the compact event
+log_to_file "COMPACT" "Trigger: $TRIGGER | Iteration: $ITERATION | Compact #$NEW_COMPACT_COUNT"
 
 exit 0

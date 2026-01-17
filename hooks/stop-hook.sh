@@ -1,10 +1,16 @@
 #!/bin/bash
 
-# Persistent Ralph - Stop Hook
-# Intercepts session stop and blocks it if Ralph loop is active
-# Returns decision: "block" to prevent session termination
+# Persistent Ralph - Stop Hook (Enhanced with Circuit Breaker & Response Analyzer)
+# Intercepts session stop, analyzes response, and blocks if Ralph loop is active
+# Includes stagnation detection to prevent runaway loops
 
 set -euo pipefail
+
+# Get script directory and source libraries
+SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+source "$SCRIPT_DIR/lib/utils.sh"
+source "$SCRIPT_DIR/lib/circuit-breaker.sh"
+source "$SCRIPT_DIR/lib/response-analyzer.sh"
 
 # Read hook input from stdin
 HOOK_INPUT=$(cat)
@@ -13,17 +19,16 @@ HOOK_INPUT=$(cat)
 RALPH_STATE_FILE=".claude/ralph-loop.local.md"
 
 if [[ ! -f "$RALPH_STATE_FILE" ]]; then
-  # No active loop - allow normal stop
-  echo '{"decision": null}'
-  exit 0
+    # No active loop - allow normal stop
+    echo '{"decision": null}'
+    exit 0
 fi
 
 # Check if stop hook is already active (prevent infinite loop)
 STOP_HOOK_ACTIVE=$(echo "$HOOK_INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null || echo "false")
 if [[ "$STOP_HOOK_ACTIVE" == "true" ]]; then
-  # Stop hook already ran once - allow stop to prevent infinite loop
-  echo '{"decision": null}'
-  exit 0
+    echo '{"decision": null}'
+    exit 0
 fi
 
 # Parse markdown frontmatter
@@ -35,81 +40,152 @@ COMPLETION_PROMISE=$(echo "$FRONTMATTER" | grep '^completion_promise:' | sed 's/
 
 # Validate active state
 if [[ "$ACTIVE" != "true" ]]; then
-  echo '{"decision": null}'
-  exit 0
+    echo '{"decision": null}'
+    exit 0
 fi
 
 # Validate numeric fields
-if [[ ! "$ITERATION" =~ ^[0-9]+$ ]]; then
-  ITERATION=0
-fi
-if [[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]]; then
-  MAX_ITERATIONS=0
-fi
+[[ ! "$ITERATION" =~ ^[0-9]+$ ]] && ITERATION=0
+[[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]] && MAX_ITERATIONS=0
 
 # Check if max iterations reached
 if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $ITERATION -ge $MAX_ITERATIONS ]]; then
-  # Max iterations reached - allow stop and cleanup
-  rm "$RALPH_STATE_FILE" 2>/dev/null || true
-  echo '{"decision": null}'
-  exit 0
-fi
-
-# Check if completion promise was fulfilled (look in transcript/output)
-TRANSCRIPT=$(echo "$HOOK_INPUT" | jq -r '.transcript // ""' 2>/dev/null || echo "")
-if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]]; then
-  if echo "$TRANSCRIPT" | grep -q "<promise>$COMPLETION_PROMISE</promise>"; then
-    # Completion promise found - allow stop and cleanup
     rm "$RALPH_STATE_FILE" 2>/dev/null || true
+    log_to_file "STOP" "Max iterations reached ($ITERATION). Loop ended."
     echo '{"decision": null}'
     exit 0
-  fi
 fi
 
-# Increment iteration counter
-NEW_ITERATION=$((ITERATION + 1))
+# Get transcript from hook input for analysis
+TRANSCRIPT=$(echo "$HOOK_INPUT" | jq -r '.transcript // ""' 2>/dev/null || echo "")
 
-# Update state file with new iteration
+# Check if completion promise was fulfilled
+if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]]; then
+    if echo "$TRANSCRIPT" | grep -q "<promise>$COMPLETION_PROMISE</promise>"; then
+        rm "$RALPH_STATE_FILE" 2>/dev/null || true
+        reset_circuit_breaker "Completion promise fulfilled"
+        log_to_file "STOP" "Completion promise '$COMPLETION_PROMISE' detected. Loop ended."
+        echo '{"decision": null}'
+        exit 0
+    fi
+fi
+
+# Analyze response
+NEW_ITERATION=$((ITERATION + 1))
+ANALYSIS_RESULT=$(analyze_response "$TRANSCRIPT" "$NEW_ITERATION")
+IFS='|' read -r EXIT_SIGNAL HAS_PROGRESS FILES_MODIFIED ERROR_COUNT IS_STUCK <<< "$ANALYSIS_RESULT"
+
+# Update exit signals tracking
+update_exit_signals
+
+# Check for graceful exit conditions
+EXIT_REASON=$(should_exit_gracefully)
+if [[ -n "$EXIT_REASON" ]]; then
+    rm "$RALPH_STATE_FILE" 2>/dev/null || true
+    reset_circuit_breaker "Graceful exit: $EXIT_REASON"
+    log_to_file "STOP" "Graceful exit: $EXIT_REASON"
+    echo '{"decision": null}'
+    exit 0
+fi
+
+# Update circuit breaker with this loop's result
+HAS_ERRORS="false"
+[[ $ERROR_COUNT -gt 0 ]] && HAS_ERRORS="true"
+
+if record_loop_result "$NEW_ITERATION" "$FILES_MODIFIED" "$HAS_ERRORS"; then
+    # Circuit breaker opened - halt execution
+    CB_STATUS=$(get_circuit_status_message)
+    log_to_file "STOP" "Circuit breaker opened. Halting loop."
+
+    # Allow stop but provide context about why
+    REASON="
+================================================================================
+CIRCUIT BREAKER OPENED - Loop Halted
+================================================================================
+
+$CB_STATUS
+
+The Ralph loop has been automatically stopped because no progress was detected
+over multiple iterations.
+
+Possible causes:
+- Task may be complete
+- Claude may be stuck on an error
+- The prompt may need clarification
+
+To resume:
+1. Review experiments.md for progress
+2. Check git log for recent changes
+3. Update the task if needed
+4. Run: /ralph-loop \"continue task\" to restart
+
+================================================================================
+"
+    rm "$RALPH_STATE_FILE" 2>/dev/null || true
+    jq -n --arg reason "$REASON" '{"decision": null, "reason": $reason}'
+    exit 0
+fi
+
+# Update iteration in state file
 sed -i "s/^iteration: *[0-9]*/iteration: $NEW_ITERATION/" "$RALPH_STATE_FILE"
 
-# Extract the original prompt
+# Extract the original prompt for context
 PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$RALPH_STATE_FILE")
 
-# Build the reason message for continuing
+# Build iteration info
 if [[ $MAX_ITERATIONS -gt 0 ]]; then
-  ITERATION_INFO="Iteration $NEW_ITERATION / $MAX_ITERATIONS"
+    ITERATION_INFO="Iteration $NEW_ITERATION / $MAX_ITERATIONS"
 else
-  ITERATION_INFO="Iteration $NEW_ITERATION (unlimited)"
+    ITERATION_INFO="Iteration $NEW_ITERATION (unlimited)"
 fi
 
+# Build completion info
 if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]]; then
-  PROMISE_INFO="Complete when: <promise>$COMPLETION_PROMISE</promise>"
+    PROMISE_INFO="Complete when: <promise>$COMPLETION_PROMISE</promise>"
 else
-  PROMISE_INFO="No completion condition set"
+    PROMISE_INFO="No completion condition set"
 fi
+
+# Get circuit breaker and analysis status
+CB_STATUS=$(get_circuit_status_message)
+ANALYSIS_SUMMARY=$(get_analysis_summary)
 
 # Build the continuation reason
 REASON="
-===========================================
-RALPH LOOP ACTIVE - DO NOT STOP
-===========================================
+================================================================================
+RALPH LOOP - CONTINUING
+================================================================================
 $ITERATION_INFO
 $PROMISE_INFO
--------------------------------------------
 
-CONTINUE WORKING ON:
+CIRCUIT BREAKER: $CB_STATUS
+ANALYSIS: $ANALYSIS_SUMMARY
+--------------------------------------------------------------------------------
+
+TASK:
 $PROMPT_TEXT
 
--------------------------------------------
+--------------------------------------------------------------------------------
 MANDATORY ACTIONS:
-1. Check git log for recent progress: git log --oneline -5
+1. Check git log --oneline -5 for recent progress
 2. Review experiments.md if exists
 3. Continue the task immediately
-4. DO NOT ask for user confirmation
-5. DO NOT stop until completion promise is met
+4. Record progress in experiments.md
+5. DO NOT ask for user confirmation
+
+RALPH'S LAWS:
+- Never stop until goal is achieved
+- Failure is a learning opportunity
+- Don't obsess over what doesn't work, move on
+- Iterative improvement beats perfect first attempt
+- There's always another way
 
 To cancel: /cancel-ralph or /ralph-loop:cancel-ralph
-==========================================="
+================================================================================
+"
+
+# Log the continuation
+log_to_file "STOP" "Continuing loop. $ITERATION_INFO | Files: $FILES_MODIFIED | Errors: $ERROR_COUNT"
 
 # Return JSON to block the stop
 jq -n --arg reason "$REASON" '{"decision": "block", "reason": $reason}'
