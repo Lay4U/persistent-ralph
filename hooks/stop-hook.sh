@@ -113,6 +113,20 @@ sed -i "s/^iteration: *[0-9]*/iteration: $NEW_ITERATION/" "$RALPH_STATE_FILE"
 # Read full state file content
 STATE_FILE_CONTENT=$(cat "$RALPH_STATE_FILE" 2>/dev/null || echo "(failed to read state file)")
 
+# Read project rule files for constraints reminder
+RULES_REMINDER=""
+for rule_file in "@AGENT.md" "requirements.md" "PROMPT.md"; do
+    if [[ -f "$rule_file" ]]; then
+        # Extract constraint/rule sections (lines with 금지, forbidden, constraint, rule, position, leverage)
+        CONSTRAINTS=$(grep -i "금지\|forbidden\|constraint\|position.*size\|leverage\|100%\|절대\|must not\|do not\|never" "$rule_file" 2>/dev/null | head -10)
+        if [[ -n "$CONSTRAINTS" ]]; then
+            RULES_REMINDER="$RULES_REMINDER
+### From $rule_file:
+$CONSTRAINTS"
+        fi
+    fi
+done
+
 # Build iteration info
 if [[ $MAX_ITERATIONS -gt 0 ]]; then
     ITERATION_INFO="Iteration $NEW_ITERATION / $MAX_ITERATIONS"
@@ -155,13 +169,23 @@ $INTERVENTION_MSG
 "
 fi
 
-# Build lightweight continuation reason (state file only)
+# Build rules section if any constraints found
+RULES_SECTION=""
+if [[ -n "$RULES_REMINDER" ]]; then
+    RULES_SECTION="
+## ⚠️ PROJECT CONSTRAINTS (MUST FOLLOW!)
+$RULES_REMINDER
+================================================================================
+"
+fi
+
+# Build lightweight continuation reason (state file + rules)
 REASON="
 ================================================================================
 RALPH LOOP - $ITERATION_INFO | $CB_STATUS
 ================================================================================
 Completion: $PROMISE_INFO
-$INTERVENTION_SECTION
+$RULES_SECTION$INTERVENTION_SECTION
 ## STATE FILE
 $STATE_FILE_CONTENT
 

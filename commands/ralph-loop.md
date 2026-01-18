@@ -5,9 +5,24 @@ argument-hint: "PROMPT [--max-iterations N] [--completion-promise TEXT]"
 
 # Ralph Loop Command
 
+## STEP 0: Read project rules (CRITICAL!)
+
+**BEFORE doing anything else**, read the project's rule files to understand constraints:
+
+1. Check for and read these files if they exist:
+   - `@AGENT.md` - Agent instructions and constraints
+   - `requirements.md` - Project requirements and forbidden actions
+   - `PROMPT.md` - Development instructions
+   - `@fix_plan.md` - Current TODO and fixed assumptions
+
+2. **Extract all constraints and forbidden actions** from these files
+3. **Include key constraints in the state file** you create in Step 1
+
+This prevents violating project rules (e.g., "100% position sizing" means NO leverage).
+
 ## STEP 1: Create the state file
 
-First, create the Ralph loop state file. Use the Write tool to create `.claude/ralph-loop.local.md` with this content:
+After reading rules, create the Ralph loop state file. Use the Write tool to create `.claude/ralph-loop.local.md` with this content:
 
 ```markdown
 ---
@@ -43,12 +58,13 @@ After creating the state file, immediately start working on the task.
 7. The loop will automatically feed the same prompt back to you
 
 **WORKFLOW:**
-1. Create `.claude/ralph-loop.local.md` state file
-2. Check git log and experiments.md for previous work
-3. Continue where you left off
-4. Make progress on the task
-5. Output RALPH_STATUS block
-6. END your response (Stop hook handles the rest)
+1. **Read @AGENT.md, requirements.md, PROMPT.md** for project rules and constraints
+2. Create `.claude/ralph-loop.local.md` state file (include key constraints!)
+3. Check git log and experiments.md for previous work
+4. Continue where you left off (respecting all constraints)
+5. Make progress on the task
+6. Output RALPH_STATUS block
+7. END your response (Stop hook handles the rest)
 
 **RALPH_STATUS FORMAT (output at end of each iteration):**
 ```
