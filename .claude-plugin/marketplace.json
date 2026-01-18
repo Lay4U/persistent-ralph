@@ -19,10 +19,7 @@
       },
       "homepage": "https://github.com/Lay4U/persistent-ralph",
       "tags": ["ralph", "loop", "autonomous", "agent", "persistent"],
-      "source": {
-        "source": "url",
-        "url": "https://github.com/Lay4U/persistent-ralph.git"
-      },
+      "source": ".",
       "category": "development"
     }
   ]
