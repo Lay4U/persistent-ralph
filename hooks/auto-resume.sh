@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Persistent Ralph - Auto-resume Hook (Enhanced)
+# Persistent Ralph - Auto-resume Hook (Full Context)
 # Triggers on ANY session start (including new sessions, compact, resume)
-# Injects strong context with circuit breaker and analysis status
+# Injects FULL context: state file + all 3 template files + experiments
 
 set -euo pipefail
 
@@ -45,12 +45,8 @@ if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $ITERATION -ge $MAX_ITERATIONS ]]; then
     exit 0
 fi
 
-# Extract prompt
-PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$RALPH_STATE_FILE")
-
-if [[ -z "$PROMPT_TEXT" ]]; then
-    exit 0
-fi
+# Read full state file content
+STATE_FILE_CONTENT=$(cat "$RALPH_STATE_FILE" 2>/dev/null || echo "(failed to read state file)")
 
 # Get source from hook input
 SOURCE=$(echo "$HOOK_INPUT" | jq -r '.source // "new_session"' 2>/dev/null || echo "new_session")
@@ -73,21 +69,8 @@ fi
 CB_STATUS="Not initialized"
 if [[ -f ".claude/circuit-breaker.json" ]]; then
     CB_STATE=$(jq -r '.state // "UNKNOWN"' .claude/circuit-breaker.json 2>/dev/null || echo "UNKNOWN")
-    CB_REASON=$(jq -r '.reason // ""' .claude/circuit-breaker.json 2>/dev/null || echo "")
     CB_NO_PROGRESS=$(jq -r '.consecutive_no_progress // 0' .claude/circuit-breaker.json 2>/dev/null || echo "0")
-    CB_STATUS="$CB_STATE | No progress: $CB_NO_PROGRESS"
-    [[ -n "$CB_REASON" ]] && CB_STATUS="$CB_STATUS | $CB_REASON"
-fi
-
-# Get analysis summary
-ANALYSIS_SUMMARY="No previous analysis"
-if [[ -f ".claude/response-analysis.json" ]]; then
-    LOOP=$(jq -r '.loop_number // 0' .claude/response-analysis.json 2>/dev/null || echo "0")
-    CONFIDENCE=$(jq -r '.analysis.confidence_score // 0' .claude/response-analysis.json 2>/dev/null || echo "0")
-    FILES=$(jq -r '.analysis.files_modified // 0' .claude/response-analysis.json 2>/dev/null || echo "0")
-    SUMMARY=$(jq -r '.analysis.work_summary // ""' .claude/response-analysis.json 2>/dev/null || echo "")
-    ANALYSIS_SUMMARY="Loop $LOOP | Confidence: $CONFIDENCE% | Files: $FILES"
-    [[ -n "$SUMMARY" ]] && ANALYSIS_SUMMARY="$ANALYSIS_SUMMARY | $SUMMARY"
+    CB_STATUS="$CB_STATE | No progress: $CB_NO_PROGRESS/5"
 fi
 
 # Get recent git commits
@@ -96,17 +79,48 @@ if command -v git &>/dev/null && git rev-parse --git-dir &>/dev/null; then
     RECENT_COMMITS=$(git log --oneline -10 2>/dev/null || echo "No git history")
 fi
 
-# Get experiments.md summary if exists
-EXPERIMENTS_SUMMARY=""
-if [[ -f "experiments.md" ]]; then
-    EXPERIMENTS_SUMMARY=$(head -50 experiments.md 2>/dev/null || echo "")
+# =============================================================================
+# Read all important files for FULL context restoration
+# =============================================================================
+
+# 1. PROMPT.md - Ralph behavior instructions (static)
+PROMPT_CONTENT=""
+if [[ -f "PROMPT.md" ]]; then
+    PROMPT_CONTENT=$(cat "PROMPT.md" 2>/dev/null || echo "")
+elif [[ -f "@PROMPT.md" ]]; then
+    PROMPT_CONTENT=$(cat "@PROMPT.md" 2>/dev/null || echo "")
 fi
 
-# Build context message
+# 2. AGENT.md - Build instructions (static)
+AGENT_CONTENT=""
+if [[ -f "AGENT.md" ]]; then
+    AGENT_CONTENT=$(cat "AGENT.md" 2>/dev/null || echo "")
+elif [[ -f "@AGENT.md" ]]; then
+    AGENT_CONTENT=$(cat "@AGENT.md" 2>/dev/null || echo "")
+fi
+
+# 3. fix_plan.md - TODO list (dynamic)
+FIX_PLAN_CONTENT=""
+if [[ -f "fix_plan.md" ]]; then
+    FIX_PLAN_CONTENT=$(cat "fix_plan.md" 2>/dev/null || echo "")
+elif [[ -f "@fix_plan.md" ]]; then
+    FIX_PLAN_CONTENT=$(cat "@fix_plan.md" 2>/dev/null || echo "")
+fi
+
+# 4. experiments.md - Progress log (dynamic, recent only)
+EXPERIMENTS_CONTENT=""
+if [[ -f "experiments.md" ]]; then
+    EXPERIMENTS_CONTENT=$(tail -100 "experiments.md" 2>/dev/null || echo "")
+fi
+
+# =============================================================================
+# Build context message with FULL restoration
+# =============================================================================
+
 CONTEXT_MSG="
 ################################################################################
 #                                                                              #
-#   PERSISTENT RALPH LOOP - AUTOMATIC RESUME                                   #
+#   PERSISTENT RALPH LOOP - SESSION RESTORED                                   #
 #   Source: $SOURCE | Compacts: $COMPACT_COUNT | Started: $STARTED_AT         #
 #                                                                              #
 ################################################################################
@@ -115,25 +129,55 @@ CONTEXT_MSG="
 - Iteration: $ITER_INFO
 - Completion: $PROMISE_INFO
 - Circuit Breaker: $CB_STATUS
-- Last Analysis: $ANALYSIS_SUMMARY
 
-## TASK
-\`\`\`
-$PROMPT_TEXT
-\`\`\`
+================================================================================
+## 1. STATE FILE (.claude/ralph-loop.local.md)
+================================================================================
+$STATE_FILE_CONTENT
 
-## RECENT PROGRESS (git log)
-\`\`\`
+================================================================================
+## 2. RECENT GIT COMMITS
+================================================================================
 $RECENT_COMMITS
-\`\`\`
 "
 
-if [[ -n "$EXPERIMENTS_SUMMARY" ]]; then
+# Add PROMPT.md (Ralph behavior)
+if [[ -n "$PROMPT_CONTENT" ]]; then
     CONTEXT_MSG="$CONTEXT_MSG
-## EXPERIMENTS LOG (recent)
-\`\`\`
-$EXPERIMENTS_SUMMARY
-\`\`\`
+================================================================================
+## 3. PROMPT.md (Ralph Behavior Instructions)
+================================================================================
+$PROMPT_CONTENT
+"
+fi
+
+# Add AGENT.md (Build instructions)
+if [[ -n "$AGENT_CONTENT" ]]; then
+    CONTEXT_MSG="$CONTEXT_MSG
+================================================================================
+## 4. AGENT.md (Build & Quality Standards)
+================================================================================
+$AGENT_CONTENT
+"
+fi
+
+# Add fix_plan.md (TODO list)
+if [[ -n "$FIX_PLAN_CONTENT" ]]; then
+    CONTEXT_MSG="$CONTEXT_MSG
+================================================================================
+## 5. fix_plan.md (Current TODO List)
+================================================================================
+$FIX_PLAN_CONTENT
+"
+fi
+
+# Add experiments.md (Progress log)
+if [[ -n "$EXPERIMENTS_CONTENT" ]]; then
+    CONTEXT_MSG="$CONTEXT_MSG
+================================================================================
+## 6. experiments.md (Recent Progress Log)
+================================================================================
+$EXPERIMENTS_CONTENT
 "
 fi
 
@@ -142,17 +186,15 @@ CONTEXT_MSG="$CONTEXT_MSG
 #                                                                              #
 #   MANDATORY INSTRUCTIONS                                                     #
 #                                                                              #
-#   1. You are in an AUTONOMOUS RALPH LOOP                                     #
-#   2. Review git log and experiments.md for previous progress                 #
-#   3. CONTINUE the task immediately - DO NOT wait for user input              #
-#   4. Record significant progress in experiments.md                           #
-#   5. DO NOT stop until the completion promise is met                         #
-#   6. If blocked, try alternative approaches                                  #
-#                                                                              #
-#   CIRCUIT BREAKER:                                                           #
-#   - Progress is tracked automatically                                        #
-#   - Loop will halt if no progress after 5 iterations                         #
-#   - Make file changes to show progress                                       #
+#   1. You are RALPH - an autonomous AI development agent                      #
+#   2. READ the STATE FILE above - it contains your TASK                       #
+#   3. FOLLOW PROMPT.md for behavior guidelines                                #
+#   4. CHECK fix_plan.md for current priorities                                #
+#   5. REVIEW experiments.md for previous learnings                            #
+#   6. USE AGENT.md for build/test commands                                    #
+#   7. CONTINUE working immediately - DO NOT wait for user input               #
+#   8. RECORD progress in experiments.md                                       #
+#   9. COMMIT changes with descriptive messages                                #
 #                                                                              #
 #   RALPH'S LAWS:                                                              #
 #   - Never stop until goal is achieved                                        #
@@ -161,7 +203,7 @@ CONTEXT_MSG="$CONTEXT_MSG
 #   - Iterative improvement beats perfect first attempt                        #
 #   - There's always another way                                               #
 #                                                                              #
-#   To cancel: /cancel-ralph or /ralph-loop:cancel-ralph                       #
+#   To cancel: /cancel-ralph                                                   #
 #                                                                              #
 ################################################################################
 
@@ -169,7 +211,7 @@ BEGIN WORKING NOW. DO NOT ASK FOR CONFIRMATION. START IMMEDIATELY.
 "
 
 # Log the resume
-log_to_file "RESUME" "Source: $SOURCE | Iteration: $ITERATION | Compacts: $COMPACT_COUNT"
+log_to_file "RESUME" "Source: $SOURCE | Iteration: $ITERATION | Compacts: $COMPACT_COUNT | Full context restored"
 
 # Output JSON with additionalContext
 jq -n --arg context "$CONTEXT_MSG" '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":$context}}'

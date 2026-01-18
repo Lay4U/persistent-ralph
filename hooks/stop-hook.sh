@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# Persistent Ralph - Stop Hook (Enhanced with Circuit Breaker & Response Analyzer)
-# Intercepts session stop, analyzes response, and blocks if Ralph loop is active
-# Includes stagnation detection, rate limiting, session management, and status generation
+# Persistent Ralph - Stop Hook (Lightweight)
+# Intercepts session stop and blocks if Ralph loop is active
+# Only includes state file to minimize token usage
+# Full context is provided by auto-resume after compact/new session
 
 set -euo pipefail
 
@@ -22,7 +23,6 @@ HOOK_INPUT=$(cat)
 RALPH_STATE_FILE=".claude/ralph-loop.local.md"
 
 if [[ ! -f "$RALPH_STATE_FILE" ]]; then
-    # No active loop - allow normal stop
     echo '{}'
     exit 0
 fi
@@ -96,34 +96,8 @@ HAS_ERRORS="false"
 [[ $ERROR_COUNT -gt 0 ]] && HAS_ERRORS="true"
 
 if record_loop_result "$NEW_ITERATION" "$FILES_MODIFIED" "$HAS_ERRORS"; then
-    # Circuit breaker opened - halt execution
     CB_STATUS=$(get_circuit_status_message)
     log_to_file "STOP" "Circuit breaker opened. Halting loop."
-
-    # Allow stop but provide context about why
-    REASON="
-================================================================================
-CIRCUIT BREAKER OPENED - Loop Halted
-================================================================================
-
-$CB_STATUS
-
-The Ralph loop has been automatically stopped because no progress was detected
-over multiple iterations.
-
-Possible causes:
-- Task may be complete
-- Claude may be stuck on an error
-- The prompt may need clarification
-
-To resume:
-1. Review experiments.md for progress
-2. Check git log for recent changes
-3. Update the task if needed
-4. Run: /ralph-loop \"continue task\" to restart
-
-================================================================================
-"
     rm "$RALPH_STATE_FILE" 2>/dev/null || true
     echo '{}'
     exit 0
@@ -132,8 +106,8 @@ fi
 # Update iteration in state file
 sed -i "s/^iteration: *[0-9]*/iteration: $NEW_ITERATION/" "$RALPH_STATE_FILE"
 
-# Extract the original prompt for context
-PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$RALPH_STATE_FILE")
+# Read full state file content
+STATE_FILE_CONTENT=$(cat "$RALPH_STATE_FILE" 2>/dev/null || echo "(failed to read state file)")
 
 # Build iteration info
 if [[ $MAX_ITERATIONS -gt 0 ]]; then
@@ -144,48 +118,32 @@ fi
 
 # Build completion info
 if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]]; then
-    PROMISE_INFO="Complete when: <promise>$COMPLETION_PROMISE</promise>"
+    PROMISE_INFO="<promise>$COMPLETION_PROMISE</promise>"
 else
-    PROMISE_INFO="No completion condition set"
+    PROMISE_INFO="(no completion condition)"
 fi
 
-# Get circuit breaker and analysis status
-CB_STATUS=$(get_circuit_status_message)
-ANALYSIS_SUMMARY=$(get_analysis_summary)
+# Get circuit breaker status (brief)
+CB_STATUS="OK"
+if [[ -f ".claude/circuit-breaker.json" ]]; then
+    CB_NO_PROGRESS=$(jq -r '.consecutive_no_progress // 0' .claude/circuit-breaker.json 2>/dev/null || echo "0")
+    CB_STATUS="no-progress: $CB_NO_PROGRESS/5"
+fi
 
-# Build the continuation reason
+# Build lightweight continuation reason (state file only)
 REASON="
 ================================================================================
-RALPH LOOP - CONTINUING
+RALPH LOOP - $ITERATION_INFO | $CB_STATUS
 ================================================================================
-$ITERATION_INFO
-$PROMISE_INFO
+Completion: $PROMISE_INFO
 
-CIRCUIT BREAKER: $CB_STATUS
-ANALYSIS: $ANALYSIS_SUMMARY
---------------------------------------------------------------------------------
+## STATE FILE
+$STATE_FILE_CONTENT
 
-TASK:
-$PROMPT_TEXT
-
---------------------------------------------------------------------------------
-MANDATORY ACTIONS:
-1. Check git log --oneline -5 for recent progress
-2. Review experiments.md if exists
-3. Continue the task immediately
-4. Record progress in experiments.md
-5. DO NOT ask for user confirmation
-
-RALPH'S LAWS:
-- Never stop until goal is achieved
-- Failure is a learning opportunity
-- Don't obsess over what doesn't work, move on
-- Iterative improvement beats perfect first attempt
-- There's always another way
-
-To cancel: /cancel-ralph or /ralph-loop:cancel-ralph
 ================================================================================
-"
+CONTINUE WORKING. Check fix_plan.md and experiments.md if context needed.
+To cancel: /cancel-ralph
+================================================================================"
 
 # Update session activity
 update_session_activity
@@ -198,22 +156,6 @@ if ! can_make_call; then
     RATE_STATUS=$(get_rate_limit_status)
     log_to_file "STOP" "Rate limit reached. $RATE_STATUS"
     generate_status "$NEW_ITERATION" "0" "rate_limit" "paused" "Rate limit reached"
-
-    RATE_REASON="
-================================================================================
-RATE LIMIT REACHED - Loop Paused
-================================================================================
-
-$RATE_STATUS
-
-The Ralph loop has been temporarily paused due to rate limiting.
-It will automatically resume when the limit resets (next hour).
-
-To check status: cat status.json
-To cancel: /cancel-ralph
-
-================================================================================
-"
     echo '{}'
     exit 0
 fi

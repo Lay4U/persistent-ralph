@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Persistent Ralph - Prompt Replace Hook (Enhanced)
-# Replaces empty/simple prompts with full task context
-# Includes circuit breaker and analysis status
+# Persistent Ralph - Prompt Replace Hook (Full Context)
+# Replaces empty/simple prompts with FULL task context
+# Same as auto-resume - provides complete context restoration
 
 set -euo pipefail
 
@@ -44,12 +44,8 @@ if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $ITERATION -ge $MAX_ITERATIONS ]]; then
     exit 0
 fi
 
-# Extract prompt
-PROMPT_TEXT=$(awk '/^---$/{i++; next} i>=2' "$RALPH_STATE_FILE")
-
-if [[ -z "$PROMPT_TEXT" ]]; then
-    exit 0
-fi
+# Read full state file content
+STATE_FILE_CONTENT=$(cat "$RALPH_STATE_FILE" 2>/dev/null || echo "(failed to read state file)")
 
 # Build iteration info
 if [[ $MAX_ITERATIONS -gt 0 ]]; then
@@ -66,49 +62,146 @@ else
 fi
 
 # Get circuit breaker status
-CB_STATUS=""
+CB_STATUS="OK"
 if [[ -f ".claude/circuit-breaker.json" ]]; then
-    CB_STATE=$(jq -r '.state // "UNKNOWN"' .claude/circuit-breaker.json 2>/dev/null || echo "UNKNOWN")
     CB_NO_PROGRESS=$(jq -r '.consecutive_no_progress // 0' .claude/circuit-breaker.json 2>/dev/null || echo "0")
-    CB_STATUS="Circuit: $CB_STATE (no-progress: $CB_NO_PROGRESS)"
+    CB_STATUS="no-progress: $CB_NO_PROGRESS/5"
 fi
 
 # Get recent git commits
 RECENT_COMMITS=""
 if command -v git &>/dev/null && git rev-parse --git-dir &>/dev/null; then
-    RECENT_COMMITS=$(git log --oneline -5 2>/dev/null || echo "")
+    RECENT_COMMITS=$(git log --oneline -10 2>/dev/null || echo "")
 fi
 
-# Build the replacement prompt
+# =============================================================================
+# Read all important files for FULL context restoration
+# =============================================================================
+
+# 1. PROMPT.md - Ralph behavior instructions (static)
+PROMPT_CONTENT=""
+if [[ -f "PROMPT.md" ]]; then
+    PROMPT_CONTENT=$(cat "PROMPT.md" 2>/dev/null || echo "")
+elif [[ -f "@PROMPT.md" ]]; then
+    PROMPT_CONTENT=$(cat "@PROMPT.md" 2>/dev/null || echo "")
+fi
+
+# 2. AGENT.md - Build instructions (static)
+AGENT_CONTENT=""
+if [[ -f "AGENT.md" ]]; then
+    AGENT_CONTENT=$(cat "AGENT.md" 2>/dev/null || echo "")
+elif [[ -f "@AGENT.md" ]]; then
+    AGENT_CONTENT=$(cat "@AGENT.md" 2>/dev/null || echo "")
+fi
+
+# 3. fix_plan.md - TODO list (dynamic)
+FIX_PLAN_CONTENT=""
+if [[ -f "fix_plan.md" ]]; then
+    FIX_PLAN_CONTENT=$(cat "fix_plan.md" 2>/dev/null || echo "")
+elif [[ -f "@fix_plan.md" ]]; then
+    FIX_PLAN_CONTENT=$(cat "@fix_plan.md" 2>/dev/null || echo "")
+fi
+
+# 4. experiments.md - Progress log (dynamic, recent only)
+EXPERIMENTS_CONTENT=""
+if [[ -f "experiments.md" ]]; then
+    EXPERIMENTS_CONTENT=$(tail -100 "experiments.md" 2>/dev/null || echo "")
+fi
+
+# =============================================================================
+# Build replacement prompt with FULL context
+# =============================================================================
+
 REPLACEMENT_PROMPT="
+################################################################################
+#   RALPH LOOP RESUME - Iteration $ITER_INFO | Compacts: $COMPACT_COUNT        #
+################################################################################
+
+## STATUS
+- Completion: $PROMISE_INFO
+- Circuit Breaker: $CB_STATUS
+
 ================================================================================
-RALPH LOOP RESUME - Iteration $ITER_INFO | Compacts: $COMPACT_COUNT
+## 1. STATE FILE (.claude/ralph-loop.local.md)
 ================================================================================
+$STATE_FILE_CONTENT
 
-TASK:
-$PROMPT_TEXT
-
-COMPLETION: $PROMISE_INFO
-$CB_STATUS
-
-RECENT PROGRESS:
+================================================================================
+## 2. RECENT GIT COMMITS
+================================================================================
 $RECENT_COMMITS
-
-================================================================================
-INSTRUCTIONS:
-1. Review git log for recent progress
-2. Check experiments.md if exists
-3. Continue working immediately
-4. Record progress in experiments.md
-5. DO NOT ask for confirmation
-6. DO NOT stop until completion promise is met
-
-RALPH'S LAWS: Never stop. Failure is learning. Always find another way.
-================================================================================
 "
 
+# Add PROMPT.md (Ralph behavior)
+if [[ -n "$PROMPT_CONTENT" ]]; then
+    REPLACEMENT_PROMPT="$REPLACEMENT_PROMPT
+================================================================================
+## 3. PROMPT.md (Ralph Behavior Instructions)
+================================================================================
+$PROMPT_CONTENT
+"
+fi
+
+# Add AGENT.md (Build instructions)
+if [[ -n "$AGENT_CONTENT" ]]; then
+    REPLACEMENT_PROMPT="$REPLACEMENT_PROMPT
+================================================================================
+## 4. AGENT.md (Build & Quality Standards)
+================================================================================
+$AGENT_CONTENT
+"
+fi
+
+# Add fix_plan.md (TODO list)
+if [[ -n "$FIX_PLAN_CONTENT" ]]; then
+    REPLACEMENT_PROMPT="$REPLACEMENT_PROMPT
+================================================================================
+## 5. fix_plan.md (Current TODO List)
+================================================================================
+$FIX_PLAN_CONTENT
+"
+fi
+
+# Add experiments.md (Progress log)
+if [[ -n "$EXPERIMENTS_CONTENT" ]]; then
+    REPLACEMENT_PROMPT="$REPLACEMENT_PROMPT
+================================================================================
+## 6. experiments.md (Recent Progress Log)
+================================================================================
+$EXPERIMENTS_CONTENT
+"
+fi
+
+REPLACEMENT_PROMPT="$REPLACEMENT_PROMPT
+################################################################################
+## MANDATORY INSTRUCTIONS
+################################################################################
+
+1. You are RALPH - an autonomous AI development agent
+2. READ the STATE FILE above - it contains your TASK
+3. FOLLOW PROMPT.md for behavior guidelines
+4. CHECK fix_plan.md for current priorities
+5. REVIEW experiments.md for previous learnings
+6. USE AGENT.md for build/test commands
+7. CONTINUE working immediately - DO NOT wait for user input
+8. RECORD progress in experiments.md
+9. COMMIT changes with descriptive messages
+
+## RALPH'S LAWS
+- Never stop until goal is achieved
+- Failure is a learning opportunity
+- Don't obsess over what doesn't work, move on
+- Iterative improvement beats perfect first attempt
+- There's always another way
+
+To cancel: /cancel-ralph
+
+################################################################################
+BEGIN WORKING NOW. DO NOT ASK FOR CONFIRMATION.
+################################################################################"
+
 # Log the prompt replace
-log_to_file "PROMPT" "Replaced empty prompt for iteration $ITERATION"
+log_to_file "PROMPT" "Replaced prompt for iteration $ITERATION | Full context restored"
 
 # Output JSON to replace the prompt
 jq -n --arg prompt "$REPLACEMENT_PROMPT" '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","modifiedPrompt":$prompt}}'
