@@ -16,8 +16,5 @@
     "claude-code",
     "plugin"
   ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Lay4U/persistent-ralph.git"
-  }
+  "repository": "https://github.com/Lay4U/persistent-ralph"
 }
