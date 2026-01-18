@@ -15,8 +15,8 @@
         "name": "Lay4U"
       },
       "source": {
-        "source": "github",
-        "repo": "Lay4U/persistent-ralph"
+        "source": "url",
+        "url": "https://github.com/Lay4U/persistent-ralph.git"
       },
       "category": "development",
       "homepage": "https://github.com/Lay4U/persistent-ralph"
