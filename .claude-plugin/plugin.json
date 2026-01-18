@@ -1,6 +1,6 @@
 {
   "name": "persistent-ralph",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Autonomous agent loop for Claude Code that never stops until the task is complete. Features Stop hook (blocks exit), PreCompact hook (saves state), SessionStart hook (auto-resume), and safety features (circuit breaker, rate limiter).",
   "author": {
     "name": "Persistent Ralph Contributors",
