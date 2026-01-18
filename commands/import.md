@@ -1,3 +1,8 @@
+---
+description: "Import existing project specifications into Ralph format"
+argument-hint: "<path-to-prd-or-requirements>"
+---
+
 # Ralph PRD Import
 
 Convert a PRD (Product Requirements Document) or any requirements document into Ralph format.

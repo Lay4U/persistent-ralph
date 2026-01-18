@@ -3,9 +3,8 @@
 # Prevents runaway loops by detecting stagnation
 # Based on Michael Nygard's "Release It!" pattern
 
-# Source utilities
-SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
-source "$SCRIPT_DIR/utils.sh"
+# Source utilities (utils.sh is in the same directory)
+source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
 # Circuit Breaker States
 CB_STATE_CLOSED="CLOSED"        # Normal operation

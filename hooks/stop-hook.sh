@@ -23,14 +23,14 @@ RALPH_STATE_FILE=".claude/ralph-loop.local.md"
 
 if [[ ! -f "$RALPH_STATE_FILE" ]]; then
     # No active loop - allow normal stop
-    echo '{"decision": null}'
+    echo '{}'
     exit 0
 fi
 
 # Check if stop hook is already active (prevent infinite loop)
 STOP_HOOK_ACTIVE=$(echo "$HOOK_INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null || echo "false")
 if [[ "$STOP_HOOK_ACTIVE" == "true" ]]; then
-    echo '{"decision": null}'
+    echo '{}'
     exit 0
 fi
 
@@ -43,7 +43,7 @@ COMPLETION_PROMISE=$(echo "$FRONTMATTER" | grep '^completion_promise:' | sed 's/
 
 # Validate active state
 if [[ "$ACTIVE" != "true" ]]; then
-    echo '{"decision": null}'
+    echo '{}'
     exit 0
 fi
 
@@ -55,7 +55,7 @@ fi
 if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $ITERATION -ge $MAX_ITERATIONS ]]; then
     rm "$RALPH_STATE_FILE" 2>/dev/null || true
     log_to_file "STOP" "Max iterations reached ($ITERATION). Loop ended."
-    echo '{"decision": null}'
+    echo '{}'
     exit 0
 fi
 
@@ -68,7 +68,7 @@ if [[ -n "$COMPLETION_PROMISE" ]] && [[ "$COMPLETION_PROMISE" != "null" ]]; then
         rm "$RALPH_STATE_FILE" 2>/dev/null || true
         reset_circuit_breaker "Completion promise fulfilled"
         log_to_file "STOP" "Completion promise '$COMPLETION_PROMISE' detected. Loop ended."
-        echo '{"decision": null}'
+        echo '{}'
         exit 0
     fi
 fi
@@ -87,7 +87,7 @@ if [[ -n "$EXIT_REASON" ]]; then
     rm "$RALPH_STATE_FILE" 2>/dev/null || true
     reset_circuit_breaker "Graceful exit: $EXIT_REASON"
     log_to_file "STOP" "Graceful exit: $EXIT_REASON"
-    echo '{"decision": null}'
+    echo '{}'
     exit 0
 fi
 
@@ -125,7 +125,7 @@ To resume:
 ================================================================================
 "
     rm "$RALPH_STATE_FILE" 2>/dev/null || true
-    jq -n --arg reason "$REASON" '{"decision": null, "reason": $reason}'
+    echo '{}'
     exit 0
 fi
 
@@ -214,7 +214,7 @@ To cancel: /cancel-ralph
 
 ================================================================================
 "
-    jq -n --arg reason "$RATE_REASON" '{"decision": null, "reason": $reason}'
+    echo '{}'
     exit 0
 fi
 
@@ -223,7 +223,7 @@ if ! is_session_valid; then
     log_to_file "STOP" "Session expired"
     generate_status "$NEW_ITERATION" "0" "session_expired" "ended" "Session expired"
     rm "$RALPH_STATE_FILE" 2>/dev/null || true
-    echo '{"decision": null}'
+    echo '{}'
     exit 0
 fi
 

@@ -11,3 +11,17 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
+
+# Ralph state files
+.claude/
+experiments.md
+status.json
+.call_count
+.last_reset
+.exit_signals
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/

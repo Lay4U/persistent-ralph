@@ -2,9 +2,8 @@
 # Persistent Ralph - Session Manager
 # Manages session lifecycle with 24-hour expiration
 
-# Source utilities
-SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
-source "$SCRIPT_DIR/utils.sh"
+# Source utilities (utils.sh is in the same directory)
+source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
 # Configuration
 SESSION_FILE=".claude/ralph-session.json"

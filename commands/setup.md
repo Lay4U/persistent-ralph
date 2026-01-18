@@ -1,3 +1,7 @@
+---
+description: "Initialize the current directory as a Ralph project"
+---
+
 # Ralph Project Setup
 
 Initialize the current directory as a Ralph project.

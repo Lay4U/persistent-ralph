@@ -1,3 +1,7 @@
+---
+description: "Explain Ralph Loop plugin and available commands"
+---
+
 # Persistent Ralph Help
 
 Please explain the following to the user:

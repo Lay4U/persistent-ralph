@@ -2,9 +2,8 @@
 # Persistent Ralph - Status Generator
 # Generates status.json for external monitoring
 
-# Source utilities
-SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
-source "$SCRIPT_DIR/utils.sh"
+# Source utilities (utils.sh is in the same directory)
+source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
 # Status file configuration
 STATUS_FILE="status.json"
