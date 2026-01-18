@@ -1,25 +1,31 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "persistent-ralph",
-  "description": "Autonomous agent loop for Claude Code that never stops until the task is complete",
   "owner": {
     "name": "Lay4U",
-    "email": "github@lay4u.dev"
+    "url": "https://github.com/Lay4U"
+  },
+  "metadata": {
+    "description": "Autonomous agent loop for Claude Code that never stops until the task is complete",
+    "version": "2.0.0"
   },
   "plugins": [
     {
       "name": "persistent-ralph",
-      "description": "Autonomous agent loop for Claude Code that never stops until the task is complete",
+      "description": "Autonomous agent loop for Claude Code that never stops until the task is complete. Features Stop hook, PreCompact hook, SessionStart hook, circuit breaker, and rate limiter.",
       "version": "2.0.0",
       "author": {
-        "name": "Lay4U"
+        "name": "Lay4U",
+        "url": "https://github.com/Lay4U"
       },
-      "source": {
-        "source": "url",
-        "url": "https://github.com/Lay4U/persistent-ralph.git"
-      },
-      "category": "development",
-      "homepage": "https://github.com/Lay4U/persistent-ralph"
+      "homepage": "https://github.com/Lay4U/persistent-ralph",
+      "tags": [
+        "ralph",
+        "loop",
+        "autonomous",
+        "agent",
+        "persistent"
+      ],
+      "source": "./plugins/persistent-ralph"
     }
   ]
 }
