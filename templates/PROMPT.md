@@ -164,6 +164,40 @@ RECOMMENDATION: Need human help - same error for 3 loops
 - Do NOT add features not in the specifications
 - Do NOT forget to include the status block (Ralph depends on it!)
 
+## Handling Large Files (IMPORTANT)
+
+파일이 너무 커서 읽기 실패할 경우:
+
+```
+Error: File content (XXXXX tokens) exceeds maximum allowed tokens (25000)
+```
+
+### 해결 방법:
+
+1. **최근 내용만 읽기** (experiments.md 등 로그 파일)
+   ```
+   Read(file_path, offset=마지막_줄-100, limit=100)
+   ```
+
+2. **특정 내용 검색** (strategy.py 등 코드 파일)
+   ```
+   Grep(pattern="def target_function", path="strategy.py")
+   ```
+
+3. **요약 파일 사용**
+   - experiments.md가 너무 크면 → experiments-summary.md 생성
+   - 핵심 결과만 요약하여 별도 파일로 관리
+
+4. **섹션별 읽기**
+   ```
+   Read(file_path, offset=0, limit=500)      # 처음 500줄
+   Read(file_path, offset=500, limit=500)    # 다음 500줄
+   ```
+
+### 대용량 파일 정리 원칙:
+- experiments.md: 1000줄 초과 시 오래된 내용 아카이브
+- 코드 파일: 500줄 초과 시 모듈 분리 고려
+
 ## File Structure
 - specs/: Project specifications and requirements
 - src/: Source code implementation
