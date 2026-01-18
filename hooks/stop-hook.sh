@@ -76,7 +76,7 @@ fi
 # Analyze response
 NEW_ITERATION=$((ITERATION + 1))
 ANALYSIS_RESULT=$(analyze_response "$TRANSCRIPT" "$NEW_ITERATION")
-IFS='|' read -r EXIT_SIGNAL HAS_PROGRESS FILES_MODIFIED ERROR_COUNT IS_STUCK <<< "$ANALYSIS_RESULT"
+IFS='|' read -r EXIT_SIGNAL HAS_PROGRESS FILES_MODIFIED ERROR_COUNT IS_STUCK ERROR_SIGNATURE <<< "$ANALYSIS_RESULT"
 
 # Update exit signals tracking
 update_exit_signals
@@ -95,7 +95,7 @@ fi
 HAS_ERRORS="false"
 [[ $ERROR_COUNT -gt 0 ]] && HAS_ERRORS="true"
 
-if record_loop_result "$NEW_ITERATION" "$FILES_MODIFIED" "$HAS_ERRORS"; then
+if record_loop_result "$NEW_ITERATION" "$FILES_MODIFIED" "$HAS_ERRORS" "$ERROR_SIGNATURE"; then
     CB_STATUS=$(get_circuit_status_message)
     log_to_file "STOP" "Circuit breaker opened. Halting loop."
     rm "$RALPH_STATE_FILE" 2>/dev/null || true
@@ -130,13 +130,34 @@ if [[ -f ".claude/circuit-breaker.json" ]]; then
     CB_STATUS="no-progress: $CB_NO_PROGRESS/5"
 fi
 
+# Get intervention message if circuit breaker detected issues
+INTERVENTION_MSG=$(get_intervention_message)
+
+# Build intervention section if needed
+INTERVENTION_SECTION=""
+if [[ -n "$INTERVENTION_MSG" ]]; then
+    INTERVENTION_SECTION="
+================================================================================
+## ⚠️ INTERVENTION REQUIRED
+================================================================================
+$INTERVENTION_MSG
+
+### ESCAPE ROUTES (Try in order):
+1. DECOMPOSE: Break the problem into smaller parts
+2. SEARCH: Look for similar patterns in codebase
+3. EXPERIMENT: Try a small test to validate hypothesis
+4. BYPASS: Try a completely different approach
+================================================================================
+"
+fi
+
 # Build lightweight continuation reason (state file only)
 REASON="
 ================================================================================
 RALPH LOOP - $ITERATION_INFO | $CB_STATUS
 ================================================================================
 Completion: $PROMISE_INFO
-
+$INTERVENTION_SECTION
 ## STATE FILE
 $STATE_FILE_CONTENT
 

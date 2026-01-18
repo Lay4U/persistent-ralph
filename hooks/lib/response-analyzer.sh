@@ -1,7 +1,7 @@
 #!/bin/bash
-# Persistent Ralph - Response Analyzer
-# Analyzes Claude output to detect completion signals and progress
-# Includes RALPH_STATUS block parsing and dual-condition EXIT_SIGNAL gate
+# Persistent Ralph - Response Analyzer (v2.0)
+# Analyzes Claude output to detect completion signals, progress, and failure patterns
+# Includes RALPH_STATUS block parsing, dual-condition EXIT_SIGNAL gate, and error signature extraction
 
 # Source utilities (utils.sh is in the same directory)
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
@@ -9,6 +9,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 # Analysis configuration
 ANALYSIS_FILE=".claude/response-analysis.json"
 EXIT_SIGNALS_FILE=".claude/exit-signals.json"
+FAILURE_PATTERNS_FILE=".claude/failure-patterns.json"
 
 # Dual-condition EXIT_SIGNAL gate configuration
 # Requires BOTH completion_indicators >= 2 AND exit_signal == true from Claude
@@ -46,6 +47,121 @@ TEST_PATTERNS=(
     "cargo test"
     "go test"
 )
+
+# Error patterns for signature extraction
+ERROR_PATTERNS=(
+    "Error:"
+    "ERROR:"
+    "Exception:"
+    "Fatal:"
+    "FATAL:"
+    "failed:"
+    "Cannot"
+    "SyntaxError"
+    "TypeError"
+    "ReferenceError"
+    "ModuleNotFoundError"
+    "ImportError"
+    "command not found"
+    "Permission denied"
+)
+
+# Extract error signature from transcript
+# Returns: A short hash representing the primary error type
+extract_error_signature() {
+    local transcript=$1
+    local signature=""
+
+    # Try to extract the first meaningful error line
+    for pattern in "${ERROR_PATTERNS[@]}"; do
+        local error_line=$(echo "$transcript" | grep -m1 "$pattern" 2>/dev/null || echo "")
+        if [[ -n "$error_line" ]]; then
+            # Clean up the error line and create a simple signature
+            # Take first 50 chars, remove special characters
+            signature=$(echo "$error_line" | head -c 80 | tr -d '\n\r' | sed 's/[^a-zA-Z0-9:_ ]//g' | xargs)
+            break
+        fi
+    done
+
+    # If no specific error, check for generic failure indicators
+    if [[ -z "$signature" ]]; then
+        if echo "$transcript" | grep -qi "test.*fail"; then
+            signature="test_failure"
+        elif echo "$transcript" | grep -qi "build.*fail"; then
+            signature="build_failure"
+        elif echo "$transcript" | grep -qi "compile.*error"; then
+            signature="compile_error"
+        fi
+    fi
+
+    echo "$signature"
+}
+
+# Record failure pattern for learning
+record_failure_pattern() {
+    local loop_number=$1
+    local error_signature=$2
+    local context=$3
+
+    if [[ -z "$error_signature" ]]; then
+        return
+    fi
+
+    ensure_dir ".claude"
+
+    # Initialize failure patterns file if needed
+    if [[ ! -f "$FAILURE_PATTERNS_FILE" ]] || ! jq '.' "$FAILURE_PATTERNS_FILE" > /dev/null 2>&1; then
+        echo '{"patterns": [], "summary": {}}' > "$FAILURE_PATTERNS_FILE"
+    fi
+
+    local patterns=$(cat "$FAILURE_PATTERNS_FILE")
+
+    # Add new pattern
+    patterns=$(echo "$patterns" | jq \
+        --arg sig "$error_signature" \
+        --argjson loop "$loop_number" \
+        --arg ctx "$context" \
+        --arg ts "$(get_iso_timestamp)" \
+        '.patterns += [{signature: $sig, loop: $loop, context: $ctx, timestamp: $ts}]')
+
+    # Update summary counts
+    local current_count=$(echo "$patterns" | jq -r --arg sig "$error_signature" '.summary[$sig] // 0')
+    current_count=$((current_count + 1))
+    patterns=$(echo "$patterns" | jq --arg sig "$error_signature" --argjson count "$current_count" \
+        '.summary[$sig] = $count')
+
+    # Keep only last 50 patterns
+    patterns=$(echo "$patterns" | jq '.patterns = .patterns[-50:]')
+
+    echo "$patterns" > "$FAILURE_PATTERNS_FILE"
+
+    log_to_file "FAILURE" "Recorded: $error_signature (count: $current_count)"
+}
+
+# Get repeated failure count for a signature
+get_failure_count() {
+    local error_signature=$1
+
+    if [[ ! -f "$FAILURE_PATTERNS_FILE" ]]; then
+        echo "0"
+        return
+    fi
+
+    local count=$(jq -r --arg sig "$error_signature" '.summary[$sig] // 0' "$FAILURE_PATTERNS_FILE" 2>/dev/null || echo "0")
+    echo "$count"
+}
+
+# Get most common failure patterns
+get_top_failures() {
+    local limit=${1:-3}
+
+    if [[ ! -f "$FAILURE_PATTERNS_FILE" ]]; then
+        echo ""
+        return
+    fi
+
+    jq -r ".summary | to_entries | sort_by(-.value) | .[:$limit] | .[].key" "$FAILURE_PATTERNS_FILE" 2>/dev/null || echo ""
+}
 
 # Analyze response for completion signals
 # Arguments: transcript_text, loop_number
@@ -121,10 +237,27 @@ analyze_response() {
         work_summary="Test execution only"
     fi
 
-    # 6. Detect errors (potential stuck loop)
+    # 6. Detect errors (potential stuck loop) and extract error signature
     local error_count=$(echo "$transcript" | grep -v '"[^"]*error[^"]*":' | \
         grep -cE '(^Error:|^ERROR:|error:|Exception|Fatal|FATAL|failed)' 2>/dev/null | tr -d '\n\r ' || echo "0")
     [[ -z "$error_count" || ! "$error_count" =~ ^[0-9]+$ ]] && error_count=0
+
+    # Extract error signature for pattern tracking
+    local error_signature=""
+    if [[ $error_count -gt 0 ]]; then
+        error_signature=$(extract_error_signature "$transcript")
+        if [[ -n "$error_signature" ]]; then
+            # Record the failure pattern
+            record_failure_pattern "$loop_number" "$error_signature" "loop_analysis"
+
+            # Check if this is a repeated failure
+            local failure_count=$(get_failure_count "$error_signature")
+            if [[ $failure_count -ge 3 ]]; then
+                is_stuck=true
+                work_summary="Repeated failure: $error_signature ($failure_count times)"
+            fi
+        fi
+    fi
 
     if [[ $error_count -gt 5 ]]; then
         is_stuck=true
@@ -158,6 +291,7 @@ analyze_response() {
         --argjson confidence_score "$confidence_score" \
         --argjson exit_signal "$exit_signal" \
         --argjson error_count "$error_count" \
+        --arg error_signature "$error_signature" \
         --arg work_summary "$work_summary" \
         '{
             loop_number: $loop_number,
@@ -171,12 +305,13 @@ analyze_response() {
                 confidence_score: $confidence_score,
                 exit_signal: $exit_signal,
                 error_count: $error_count,
+                error_signature: $error_signature,
                 work_summary: $work_summary
             }
         }' > "$ANALYSIS_FILE"
 
-    # Return key values for use in hooks
-    echo "$exit_signal|$has_progress|$files_modified|$error_count|$is_stuck"
+    # Return key values for use in hooks (added error_signature)
+    echo "$exit_signal|$has_progress|$files_modified|$error_count|$is_stuck|$error_signature"
 }
 
 # Get analysis summary for context injection

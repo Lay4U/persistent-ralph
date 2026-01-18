@@ -187,12 +187,15 @@ REPLACEMENT_PROMPT="$REPLACEMENT_PROMPT
 8. RECORD progress in experiments.md
 9. COMMIT changes with descriptive messages
 
-## RALPH'S LAWS
-- Never stop until goal is achieved
-- Failure is a learning opportunity
-- Don't obsess over what doesn't work, move on
-- Iterative improvement beats perfect first attempt
-- There's always another way
+## RALPH'S LAWS (v2.0)
+1. Never stop until goal is achieved
+2. Failure is data, not defeat
+3. Pivot, don't persist on dead ends
+4. Progress over perfection
+5. There's always another way
+6. Record everything
+7. Small commits, frequent progress
+8. Leave context for future self
 
 To cancel: /cancel-ralph
 
