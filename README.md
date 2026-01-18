@@ -26,7 +26,7 @@ Based on the [Ralph Technique](https://ghuntley.com/ralph/) by Geoffrey Huntley,
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/persistent-ralph.git
+git clone https://github.com/Lay4U/persistent-ralph.git
 
 # Run Claude Code with the plugin
 claude --plugin-dir /path/to/persistent-ralph

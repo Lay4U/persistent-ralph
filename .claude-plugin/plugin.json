@@ -4,7 +4,7 @@
   "description": "Autonomous agent loop for Claude Code that never stops until the task is complete. Features Stop hook (blocks exit), PreCompact hook (saves state), SessionStart hook (auto-resume), and safety features (circuit breaker, rate limiter).",
   "author": {
     "name": "Persistent Ralph Contributors",
-    "url": "https://github.com/yourusername/persistent-ralph"
+    "url": "https://github.com/Lay4U/persistent-ralph"
   },
   "license": "MIT",
   "keywords": [
@@ -18,6 +18,6 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/persistent-ralph.git"
+    "url": "https://github.com/Lay4U/persistent-ralph.git"
   }
 }
