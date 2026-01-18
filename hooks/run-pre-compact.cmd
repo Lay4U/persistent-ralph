@@ -11,4 +11,8 @@ if not exist "%BASH_PATH%" (
     exit /b 0
 )
 
-"%BASH_PATH%" "%SCRIPT_DIR%pre-compact.sh"
+REM Convert Windows path to Unix path and export SCRIPT_DIR so the script can find lib/
+set "UNIX_SCRIPT_DIR=%SCRIPT_DIR:\=/%"
+
+REM Use source (.) with SCRIPT_DIR env var to work around Windows subprocess output issues
+"%BASH_PATH%" -c "cd \"%CD%\" && export SCRIPT_DIR='%UNIX_SCRIPT_DIR%' && . '%UNIX_SCRIPT_DIR%pre-compact.sh'"

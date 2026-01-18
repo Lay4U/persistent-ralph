@@ -230,7 +230,9 @@ analyze_response() {
     done
 
     impl_count=$(echo "$transcript" | grep -ci "implementing\|creating\|writing\|adding\|function\|class" 2>/dev/null | tr -d '\n\r ' || echo "0")
-    [[ -z "$impl_count" || ! "$impl_count" =~ ^[0-9]+$ ]] && impl_count=0
+    impl_count=$(echo "$impl_count" | tr -cd '0-9')
+    [[ -z "$impl_count" ]] && impl_count=0
+    impl_count=$((10#$impl_count))
 
     if [[ $test_count -gt 0 && $impl_count -eq 0 ]]; then
         is_test_only=true
@@ -240,7 +242,10 @@ analyze_response() {
     # 6. Detect errors (potential stuck loop) and extract error signature
     local error_count=$(echo "$transcript" | grep -v '"[^"]*error[^"]*":' | \
         grep -cE '(^Error:|^ERROR:|error:|Exception|Fatal|FATAL|failed)' 2>/dev/null | tr -d '\n\r ' || echo "0")
-    [[ -z "$error_count" || ! "$error_count" =~ ^[0-9]+$ ]] && error_count=0
+    error_count=$(echo "$error_count" | tr -cd '0-9')
+    [[ -z "$error_count" ]] && error_count=0
+    # Remove leading zeros to ensure valid JSON number
+    error_count=$((10#$error_count))
 
     # Extract error signature for pattern tracking
     local error_signature=""
@@ -267,7 +272,9 @@ analyze_response() {
     local files_modified=0
     if command -v git &>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
         files_modified=$(git diff --name-only 2>/dev/null | wc -l | tr -d '\n\r ')
-        [[ -z "$files_modified" || ! "$files_modified" =~ ^[0-9]+$ ]] && files_modified=0
+        files_modified=$(echo "$files_modified" | tr -cd '0-9')
+        [[ -z "$files_modified" ]] && files_modified=0
+        files_modified=$((10#$files_modified))
         if [[ $files_modified -gt 0 ]]; then
             has_progress=true
             confidence_score=$((confidence_score + 20))

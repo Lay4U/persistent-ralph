@@ -6,8 +6,10 @@
 
 set -euo pipefail
 
-# Get script directory and source libraries
-SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+# Get script directory (use SCRIPT_DIR env var if set, otherwise detect)
+if [[ -z "${SCRIPT_DIR:-}" ]]; then
+    SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+fi
 source "$SCRIPT_DIR/lib/utils.sh"
 
 # Read hook input from stdin

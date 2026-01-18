@@ -7,8 +7,10 @@
 
 set -euo pipefail
 
-# Get script directory and source libraries
-SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+# Get script directory (use SCRIPT_DIR env var if set, otherwise detect)
+if [[ -z "${SCRIPT_DIR:-}" ]]; then
+    SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+fi
 source "$SCRIPT_DIR/lib/utils.sh"
 source "$SCRIPT_DIR/lib/circuit-breaker.sh"
 source "$SCRIPT_DIR/lib/response-analyzer.sh"
@@ -47,9 +49,11 @@ if [[ "$ACTIVE" != "true" ]]; then
     exit 0
 fi
 
-# Validate numeric fields
-[[ ! "$ITERATION" =~ ^[0-9]+$ ]] && ITERATION=0
-[[ ! "$MAX_ITERATIONS" =~ ^[0-9]+$ ]] && MAX_ITERATIONS=0
+# Validate numeric fields (use tr instead of regex for Windows Git Bash compatibility)
+ITERATION=$(echo "$ITERATION" | tr -cd '0-9')
+[[ -z "$ITERATION" ]] && ITERATION=0
+MAX_ITERATIONS=$(echo "$MAX_ITERATIONS" | tr -cd '0-9')
+[[ -z "$MAX_ITERATIONS" ]] && MAX_ITERATIONS=0
 
 # Check if max iterations reached
 if [[ $MAX_ITERATIONS -gt 0 ]] && [[ $ITERATION -ge $MAX_ITERATIONS ]]; then
@@ -81,8 +85,8 @@ IFS='|' read -r EXIT_SIGNAL HAS_PROGRESS FILES_MODIFIED ERROR_COUNT IS_STUCK ERR
 # Update exit signals tracking
 update_exit_signals
 
-# Check for graceful exit conditions
-EXIT_REASON=$(should_exit_gracefully)
+# Check for graceful exit conditions (use || true to prevent set -e from exiting on return 1)
+EXIT_REASON=$(should_exit_gracefully || true)
 if [[ -n "$EXIT_REASON" ]]; then
     rm "$RALPH_STATE_FILE" 2>/dev/null || true
     reset_circuit_breaker "Graceful exit: $EXIT_REASON"
@@ -166,8 +170,8 @@ CONTINUE WORKING. Check fix_plan.md and experiments.md if context needed.
 To cancel: /cancel-ralph
 ================================================================================"
 
-# Update session activity
-update_session_activity
+# Update session activity (redirect to /dev/null to prevent session_id output)
+update_session_activity > /dev/null
 
 # Increment call counter for rate limiting
 increment_call_counter > /dev/null

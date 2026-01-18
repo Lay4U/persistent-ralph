@@ -1,11 +1,18 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Get the directory where this script is located
+REM Persistent Ralph - Auto-Resume Hook Windows Wrapper
+REM Executes auto-resume.sh using Git Bash
+
 set "SCRIPT_DIR=%~dp0"
+set "BASH_PATH=C:\Program Files\Git\bin\bash.exe"
 
-REM Remove trailing backslash
-set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+if not exist "%BASH_PATH%" (
+    exit /b 0
+)
 
-REM Run the bash script using Git Bash
-"C:\Program Files\Git\bin\bash.exe" "%SCRIPT_DIR%\auto-resume.sh"
+REM Convert Windows path to Unix path and export SCRIPT_DIR so the script can find lib/
+set "UNIX_SCRIPT_DIR=%SCRIPT_DIR:\=/%"
+
+REM Use source (.) with SCRIPT_DIR env var to work around Windows subprocess output issues
+"%BASH_PATH%" -c "cd \"%CD%\" && export SCRIPT_DIR='%UNIX_SCRIPT_DIR%' && . '%UNIX_SCRIPT_DIR%auto-resume.sh'"
