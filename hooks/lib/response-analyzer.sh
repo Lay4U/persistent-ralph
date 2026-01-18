@@ -113,8 +113,8 @@ analyze_response() {
         fi
     done
 
-    impl_count=$(echo "$transcript" | grep -ci "implementing\|creating\|writing\|adding\|function\|class" 2>/dev/null || echo "0")
-    impl_count=$((impl_count + 0))
+    impl_count=$(echo "$transcript" | grep -ci "implementing\|creating\|writing\|adding\|function\|class" 2>/dev/null | tr -d '\n\r ' || echo "0")
+    [[ -z "$impl_count" || ! "$impl_count" =~ ^[0-9]+$ ]] && impl_count=0
 
     if [[ $test_count -gt 0 && $impl_count -eq 0 ]]; then
         is_test_only=true
@@ -123,8 +123,8 @@ analyze_response() {
 
     # 6. Detect errors (potential stuck loop)
     local error_count=$(echo "$transcript" | grep -v '"[^"]*error[^"]*":' | \
-        grep -cE '(^Error:|^ERROR:|error:|Exception|Fatal|FATAL|failed)' 2>/dev/null || echo "0")
-    error_count=$((error_count + 0))
+        grep -cE '(^Error:|^ERROR:|error:|Exception|Fatal|FATAL|failed)' 2>/dev/null | tr -d '\n\r ' || echo "0")
+    [[ -z "$error_count" || ! "$error_count" =~ ^[0-9]+$ ]] && error_count=0
 
     if [[ $error_count -gt 5 ]]; then
         is_stuck=true
@@ -133,8 +133,8 @@ analyze_response() {
     # 7. Check for file changes via git
     local files_modified=0
     if command -v git &>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
-        files_modified=$(git diff --name-only 2>/dev/null | wc -l)
-        files_modified=$((files_modified + 0))
+        files_modified=$(git diff --name-only 2>/dev/null | wc -l | tr -d '\n\r ')
+        [[ -z "$files_modified" || ! "$files_modified" =~ ^[0-9]+$ ]] && files_modified=0
         if [[ $files_modified -gt 0 ]]; then
             has_progress=true
             confidence_score=$((confidence_score + 20))

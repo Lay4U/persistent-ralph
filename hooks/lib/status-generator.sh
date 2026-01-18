@@ -50,7 +50,8 @@ generate_status() {
     local uncommitted_files=0
     if command -v git &>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
         recent_commit=$(git log --oneline -1 2>/dev/null || echo "")
-        uncommitted_files=$(git status --porcelain 2>/dev/null | wc -l)
+        uncommitted_files=$(git status --porcelain 2>/dev/null | wc -l | tr -d '\n\r ')
+        [[ -z "$uncommitted_files" || ! "$uncommitted_files" =~ ^[0-9]+$ ]] && uncommitted_files=0
     fi
 
     # Calculate next hour reset time
