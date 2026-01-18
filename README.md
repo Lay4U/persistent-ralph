@@ -22,7 +22,7 @@ Based on the [Ralph Technique](https://ghuntley.com/ralph/) by Geoffrey Huntley,
 
 ## Installation
 
-### Option 1: Install from GitHub (Recommended)
+### Option 1: Install from GitHub Marketplace
 
 ```bash
 # Add the marketplace
@@ -32,25 +32,42 @@ Based on the [Ralph Technique](https://ghuntley.com/ralph/) by Geoffrey Huntley,
 /plugin install persistent-ralph@persistent-ralph
 ```
 
-Or use the interactive plugin manager:
-```bash
-/plugin
-```
+> **Note:** Claude Code uses SSH to clone plugins. You need SSH keys configured with GitHub.
+> See [SSH Key Setup](#ssh-key-setup) below if you get "Permission denied (publickey)" error.
 
-### Option 2: Using `--plugin-dir` flag (For development)
+### Option 2: Using `--plugin-dir` flag (No SSH required)
 
 ```bash
 # Clone the repository
 git clone https://github.com/Lay4U/persistent-ralph.git
 
 # Run Claude Code with the plugin
-claude --plugin-dir /path/to/persistent-ralph
+claude --plugin-dir /path/to/persistent-ralph/plugins/persistent-ralph
 ```
 
 ### Requirements
 
 - **Git Bash** (Windows): Required for running shell scripts
 - **jq**: JSON processor (`choco install jq` on Windows, `brew install jq` on macOS)
+
+### SSH Key Setup
+
+Claude Code requires SSH authentication to install plugins from GitHub ([related issue](https://github.com/anthropics/claude-code/issues/14485)).
+
+```bash
+# 1. Generate SSH key (skip if you already have one)
+ssh-keygen -t ed25519 -C "your_email@example.com"
+
+# 2. Copy your public key
+cat ~/.ssh/id_ed25519.pub
+```
+
+3. Add the key to GitHub: https://github.com/settings/keys
+4. Test connection:
+```bash
+ssh -T git@github.com
+# Should show: "Hi username! You've successfully authenticated..."
+```
 
 ## Usage
 
