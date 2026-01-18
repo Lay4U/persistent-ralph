@@ -1,0 +1,25 @@
+{
+  "name": "persistent-ralph",
+  "owner": {
+    "name": "Lay4U",
+    "url": "https://github.com/Lay4U"
+  },
+  "metadata": {
+    "description": "Autonomous agent loop for Claude Code that never stops until the task is complete"
+  },
+  "plugins": [
+    {
+      "name": "persistent-ralph",
+      "source": ".",
+      "description": "Autonomous agent loop for Claude Code that never stops until the task is complete",
+      "version": "2.0.0",
+      "author": {
+        "name": "Lay4U"
+      },
+      "homepage": "https://github.com/Lay4U/persistent-ralph",
+      "repository": "https://github.com/Lay4U/persistent-ralph",
+      "license": "MIT",
+      "keywords": ["ralph", "loop", "autonomous", "agent", "persistent"]
+    }
+  ]
+}

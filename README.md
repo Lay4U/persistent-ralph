@@ -22,7 +22,22 @@ Based on the [Ralph Technique](https://ghuntley.com/ralph/) by Geoffrey Huntley,
 
 ## Installation
 
-### Option 1: Using `--plugin-dir` flag (Recommended for development)
+### Option 1: Install from GitHub (Recommended)
+
+```bash
+# Add the marketplace
+/plugin marketplace add Lay4U/persistent-ralph
+
+# Install the plugin
+/plugin install persistent-ralph@persistent-ralph
+```
+
+Or use the interactive plugin manager:
+```bash
+/plugin
+```
+
+### Option 2: Using `--plugin-dir` flag (For development)
 
 ```bash
 # Clone the repository
@@ -30,21 +45,6 @@ git clone https://github.com/Lay4U/persistent-ralph.git
 
 # Run Claude Code with the plugin
 claude --plugin-dir /path/to/persistent-ralph
-```
-
-### Option 2: Global installation
-
-```bash
-# Copy to Claude plugins directory
-mkdir -p ~/.claude/plugins/local
-cp -r persistent-ralph ~/.claude/plugins/local/
-
-# Add to ~/.claude/settings.json
-{
-  "enabledPlugins": {
-    "persistent-ralph@local": true
-  }
-}
 ```
 
 ### Requirements
