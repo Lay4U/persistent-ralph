@@ -10,12 +10,12 @@ Convert a PRD (Product Requirements Document) or any requirements document into 
 ## Usage
 
 ```
-/ralph-loop:import <path-to-prd>
+/persistent-ralph:import <path-to-prd>
 ```
 
 Or with content:
 ```
-/ralph-loop:import
+/persistent-ralph:import
 <paste PRD content here>
 ```
 

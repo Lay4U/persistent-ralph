@@ -12,10 +12,7 @@ Create the following project structure and files:
 
 1. **Create directories:**
    - `specs/` - Project specifications
-   - `src/` - Source code
-   - `examples/` - Example usage
    - `logs/` - Log files (add to .gitignore)
-   - `.claude/` - Ralph state files (add to .gitignore)
 
 2. **Copy template files:**
    - Create `PROMPT.md` from plugin templates/PROMPT.md
@@ -29,9 +26,6 @@ Create the following project structure and files:
    .claude/
    experiments.md
    status.json
-   .call_count
-   .last_reset
-   .exit_signals
    ```
 
 4. **Create initial spec file:**
@@ -49,14 +43,11 @@ Tell the user:
 - Edit `PROMPT.md` to describe your project
 - Add specifications to `specs/` directory
 - Update `@fix_plan.md` with initial tasks
-- Start Ralph loop with: `/ralph-loop "your task"`
+- Start Ralph loop with: `/persistent-ralph:ralph-loop "your task"`
 
 ## IMPORTANT
 
 Actually create all the files and directories. Do not just describe what to do.
 
-Read the template files from the plugin directory:
-- Plugin root: ${CLAUDE_PLUGIN_ROOT} or find it from this file's location
-- Templates are in: `templates/PROMPT.md`, `templates/fix_plan.md`, `templates/AGENT.md`
-
-If templates are not accessible, use default content from knowledge.
+Read the template files from the plugin directory and create them in the project.
+If templates are not accessible, use sensible default content.

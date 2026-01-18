@@ -6,83 +6,78 @@ description: "Explain Ralph Loop plugin and available commands"
 
 Please explain the following to the user:
 
-## 개요
+## Overview
 
-Persistent Ralph는 **완전 자율 에이전트 시스템**입니다. Auto-compact 이후에도 절대 멈추지 않습니다.
+Persistent Ralph is a **fully autonomous agent system** for Claude Code. It never stops until the task is complete, even after auto-compact.
 
-Ralph-claude-code의 모든 핵심 기능을 Claude Code 플러그인으로 통합했습니다.
+## Core Hooks
 
-## 핵심 기능
+| Hook | Function |
+|------|----------|
+| **Stop** | Blocks session exit (`decision: block`) + Rate Limiting |
+| **PreCompact** | Saves state before compact (`experiments.md`) |
+| **SessionStart** | Auto-resumes on new session (context injection) |
+| **UserPromptSubmit** | Replaces empty input with task prompt |
 
-| Hook | 기능 |
-|------|------|
-| **Stop** | 세션 종료 차단 (`decision: block`) + Rate Limiting |
-| **PreCompact** | Compact 전 상태 저장 (`experiments.md`) |
-| **SessionStart** | 새 세션에서 자동 재개 (컨텍스트 주입) |
-| **UserPromptSubmit** | 빈 입력 시 프롬프트 대체 |
+## Safety Features
 
-## 고급 기능 (ralph-claude-code에서 통합)
+### 1. Circuit Breaker
+- **CLOSED**: Normal operation
+- **HALF_OPEN**: Monitoring mode (2 iterations with no progress)
+- **OPEN**: Stops execution (5 iterations with no progress)
 
-### 1. Circuit Breaker (회로 차단기)
-- **CLOSED**: 정상 동작
-- **HALF_OPEN**: 모니터링 모드 (진행 없음 2회)
-- **OPEN**: 실행 중지 (진행 없음 5회)
-
-### 2. Response Analyzer (응답 분석기)
-- `RALPH_STATUS` 블록 파싱
-- 완료 신호 감지
+### 2. Response Analyzer
+- Parses `RALPH_STATUS` blocks
+- Detects completion signals
 - Dual-condition EXIT_SIGNAL gate
 
-### 3. Rate Limiter (속도 제한)
-- 시간당 100회 API 호출 제한
-- 5시간 API 제한 감지
-- 자동 리셋 및 재개
+### 3. Rate Limiter
+- 100 API calls/hour limit
+- 5-hour API limit detection
+- Automatic reset and resume
 
-### 4. Session Manager (세션 관리)
-- 24시간 세션 만료
-- 세션 히스토리 추적
-- 자동 세션 연장
+### 4. Session Manager
+- 24-hour session expiry
+- Session history tracking
+- Automatic session extension
 
-### 5. Status Generator (상태 생성)
-- `status.json` 실시간 생성
-- 외부 모니터링 지원
-- 진행 상황 추적
+### 5. Status Generator
+- Real-time `status.json` generation
+- External monitoring support
+- Progress tracking
 
-## 사용법
+## Commands
 
-### 프로젝트 설정
+### Project Setup
 ```bash
-/ralph-loop:setup
+/persistent-ralph:setup
 ```
-- PROMPT.md, @fix_plan.md, @AGENT.md 생성
-- specs/ 디렉토리 구조 생성
-- .gitignore 설정
+Creates PROMPT.md, @fix_plan.md, @AGENT.md and specs/ directory.
 
-### PRD 가져오기
+### Import PRD
 ```bash
-/ralph-loop:import <path-to-prd>
+/persistent-ralph:import <path-to-prd>
 ```
-- PRD를 Ralph specs 형식으로 변환
-- @fix_plan.md에 작업 추가
+Converts PRD to Ralph specs format.
 
-### Ralph Loop 시작
+### Start Ralph Loop
 ```bash
-/ralph-loop "작업 설명" --completion-promise "DONE" --max-iterations 100
+/persistent-ralph:ralph-loop "task description" --completion-promise "DONE" --max-iterations 100
 ```
 
-### 상태 확인
+### Check Status
 ```bash
 cat status.json
 ```
 
-### 취소
+### Cancel Loop
 ```bash
-/cancel-ralph
+/persistent-ralph:cancel-ralph
 ```
 
-## RALPH_STATUS 블록
+## RALPH_STATUS Block
 
-Claude가 다음 형식으로 상태를 보고합니다:
+Claude reports status in this format:
 
 ```
 ---RALPH_STATUS---
@@ -92,112 +87,57 @@ FILES_MODIFIED: <number>
 TESTS_STATUS: PASSING | FAILING | NOT_RUN
 WORK_TYPE: IMPLEMENTATION | TESTING | DOCUMENTATION | REFACTORING
 EXIT_SIGNAL: false | true
-RECOMMENDATION: <다음 단계 요약>
+RECOMMENDATION: <next step summary>
 ---END_RALPH_STATUS---
 ```
 
-### EXIT_SIGNAL = true 조건
-1. @fix_plan.md의 모든 항목 완료
-2. 모든 테스트 통과
-3. 에러 없음
-4. specs/ 요구사항 모두 구현
+### EXIT_SIGNAL = true Conditions
+1. All items in @fix_plan.md completed
+2. All tests passing
+3. No errors
+4. All specs/ requirements implemented
 
-## 완료 조건
+## Completion Condition
 
-Claude가 다음 형식으로 출력하면 루프 종료:
+Loop exits when Claude outputs:
 
 ```
 <promise>DONE</promise>
 ```
 
-## 동작 흐름
+## State Files
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    RALPH LOOP                        │
-├─────────────────────────────────────────────────────┤
-│                                                      │
-│   [작업 시작] ────▶ [작업 중] ────▶ [완료 시도]     │
-│        │                               │            │
-│        │                               ▼            │
-│        │                        [Stop Hook]         │
-│        │                               │            │
-│        │              ┌────────────────┴────────┐   │
-│        │              │                         │   │
-│        │         completion             루프 활성  │
-│        │         promise 발견           상태 확인  │
-│        │              │                         │   │
-│        │              ▼                         ▼   │
-│        │         [종료 허용]          [종료 차단]  │
-│        │                               reason 주입 │
-│        │                                    │      │
-│        │                                    ▼      │
-│        │                              [작업 계속]  │
-│        │                                    │      │
-│        └────────────────────────────────────┘      │
-│                                                      │
-├─────────────────────────────────────────────────────┤
-│                  추가 기능                           │
-├─────────────────────────────────────────────────────┤
-│  Circuit Breaker → Rate Limiter → Session Manager   │
-│         ↓               ↓               ↓           │
-│  스태그 감지      속도 제한        세션 만료        │
-│         ↓               ↓               ↓           │
-│  루프 중지        일시 정지        루프 종료        │
-└─────────────────────────────────────────────────────┘
-```
+| File | Description |
+|------|-------------|
+| `.claude/ralph-loop.local.md` | Loop state (iteration, promise) |
+| `.claude/circuit-breaker.json` | Circuit breaker state |
+| `.claude/call-count.json` | API call counter |
+| `status.json` | Monitoring status |
+| `experiments.md` | Progress log |
 
-## 랄프의 법칙
+## Environment Variables
 
-1. **멈추지 않는다** - 목표 달성까지 계속
-2. **실패는 학습** - 기록하고 다음 시도에 반영
-3. **과감히 버린다** - 안 되는 것에 집착 금지
-4. **반복적 개선** - 완벽한 첫 시도보다 나음
-5. **항상 방법이 있다** - "불가능"은 없다
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RALPH_MAX_CALLS_PER_HOUR` | 100 | Max API calls per hour |
+| `RALPH_API_LIMIT_HOURS` | 5 | Hours to wait after rate limit |
+| `RALPH_SESSION_EXPIRY_HOURS` | 24 | Session expiry time |
 
-## 상태 파일
+## Troubleshooting
 
-| 파일 | 설명 |
-|------|------|
-| `.claude/ralph-loop.local.md` | 루프 상태 (iteration, promise 등) |
-| `.claude/circuit-breaker.json` | Circuit Breaker 상태 |
-| `.claude/response-analysis.json` | 응답 분석 결과 |
-| `.claude/call-count.json` | API 호출 카운트 |
-| `.claude/ralph-session.json` | 세션 정보 |
-| `status.json` | 모니터링용 상태 |
-| `experiments.md` | 진행 상황 로그 (compact 마다 갱신) |
+### Loop doesn't resume
+1. Check `.claude/ralph-loop.local.md` exists
+2. Verify `active: true`
 
-## 환경 변수
-
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| `RALPH_MAX_CALLS_PER_HOUR` | 100 | 시간당 최대 API 호출 |
-| `RALPH_API_LIMIT_HOURS` | 5 | API 제한 해제 대기 시간 |
-| `RALPH_SESSION_EXPIRY_HOURS` | 24 | 세션 만료 시간 |
-
-## 트러블슈팅
-
-### 루프가 재개되지 않음
-1. `.claude/ralph-loop.local.md` 파일 확인
-2. `active: true` 확인
-
-### Stop Hook 미작동
-1. Git Bash 설치 확인
-2. hooks.json의 Stop 정의 확인
+### Stop Hook not working
+1. Verify Git Bash is installed
+2. Check hooks.json Stop definition
 
 ### Circuit Breaker OPEN
-1. experiments.md 확인
-2. git log로 진행 상황 확인
-3. 문제 해결 후 `/ralph-loop "continue"` 실행
+1. Check experiments.md
+2. Review git log for progress
+3. Restart with `/persistent-ralph:ralph-loop "continue"`
 
-### Rate Limit 도달
-1. status.json에서 reset 시간 확인
-2. 자동 재개 대기
-
-## 관련 명령어
-
-- `/ralph-loop` - 루프 시작
-- `/ralph-loop:setup` - 프로젝트 설정
-- `/ralph-loop:import` - PRD 가져오기
-- `/ralph-loop:help` - 도움말
-- `/cancel-ralph` - 루프 취소
+### Rate Limit reached
+1. Check status.json for reset time
+2. Wait for automatic resume

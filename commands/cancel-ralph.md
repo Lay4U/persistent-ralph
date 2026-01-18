@@ -1,17 +1,24 @@
 ---
 description: "Cancel active Ralph Loop"
-allowed-tools: ["Bash(test -f .claude/ralph-loop.local.md:*)", "Bash(rm .claude/ralph-loop.local.md)", "Read(.claude/ralph-loop.local.md)"]
 ---
 
-# Cancel Ralph
+# Cancel Ralph Loop
 
-To cancel the Ralph loop:
+Stop the currently active Ralph loop.
 
-1. Check if `.claude/ralph-loop.local.md` exists using Bash: `test -f .claude/ralph-loop.local.md && echo "EXISTS" || echo "NOT_FOUND"`
+## Instructions
 
-2. **If NOT_FOUND**: Say "No active Ralph loop found."
+1. **Check if loop is active:**
+   Check if `.claude/ralph-loop.local.md` exists
 
-3. **If EXISTS**:
-   - Read `.claude/ralph-loop.local.md` to get the current iteration number from the `iteration:` field
-   - Remove the file using Bash: `rm .claude/ralph-loop.local.md`
-   - Report: "Cancelled Ralph loop (was at iteration N)" where N is the iteration value
+2. **If file NOT found:**
+   Tell the user "No active Ralph loop found."
+
+3. **If file EXISTS:**
+   - Read `.claude/ralph-loop.local.md` to get the current iteration
+   - Delete the file to stop the loop
+   - Report: "Cancelled Ralph loop at iteration N"
+
+4. **Confirm to user:**
+   - Loop has been cancelled
+   - To restart: `/persistent-ralph:ralph-loop "continue previous work"`
