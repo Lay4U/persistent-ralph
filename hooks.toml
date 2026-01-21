@@ -1,0 +1,10 @@
+# Persistent Ralph - Hooks Configuration
+# Registers hooks with Claude Code
+
+[[hooks]]
+event = "Stop"
+command = "hooks/run-stop-hook.cmd"
+
+[[hooks]]
+event = "PreCompact"
+command = "hooks/run-pre-compact.cmd"
