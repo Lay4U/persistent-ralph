@@ -11,11 +11,30 @@ SESSION_EXPIRY_HOURS=${RALPH_SESSION_EXPIRY_HOURS:-24}
 SESSION_HISTORY_FILE=".claude/session-history.json"
 
 # Initialize session manager
+# Creates new session if:
+# 1. Session file doesn't exist, OR
+# 2. Session file exists but is expired
 init_session() {
     ensure_dir ".claude"
 
     if [[ ! -f "$SESSION_FILE" ]]; then
-        create_new_session
+        create_new_session > /dev/null  # Suppress session_id echo
+        return
+    fi
+
+    # Check if existing session is expired
+    local expires_at=$(json_get "$SESSION_FILE" '.expires_at' '')
+    if [[ -n "$expires_at" ]]; then
+        local expire_epoch=$(date -d "$expires_at" +%s 2>/dev/null || echo "0")
+        local current_epoch=$(get_epoch_seconds)
+
+        if [[ $current_epoch -gt $expire_epoch ]]; then
+            # Session expired - save to history and create new one
+            log_to_file "SESSION" "Existing session expired, creating new session"
+            save_session_to_history "Auto-expired (24h timeout)"
+            rm -f "$SESSION_FILE"
+            create_new_session > /dev/null  # Suppress session_id echo
+        fi
     fi
 }
 
